@@ -1,0 +1,149 @@
+[2026-09-25T13:05:17.386Z] POST /share-target:
+- Form fields: ["title"]
+- Files count: 1
+- File details: file, voice-khilla.opus, audio/ogg, size=132
+[2026-09-26T15:43:17.495Z] POST /share-target:
+- Form fields: []
+- Files count: 0
+- File details: NONE
+[2026-09-26T15:43:23.742Z] POST /share-target:
+- Form fields: []
+- Files count: 1
+- File details: audio, test.opus, audio/ogg, size=24
+[2026-09-26T15:49:25.463Z] POST /share-target:
+- Form fields: []
+- Files count: 1
+- File details: media, whatsapp_voice.opus, audio/ogg, size=247
+- Magic detection: {"isVideo":false,"mime":"audio/ogg","ext":"opus"}
+[2026-09-26T15:49:36.050Z] POST /share-target:
+- Form fields: []
+- Files count: 1
+- File details: media, whatsapp_video.mp4, video/mp4, size=328
+- Magic detection: {"isVideo":true,"mime":"video/mp4","ext":"mp4"}
+[2026-09-26T15:49:49.188Z] POST /share-target:
+- Form fields: ["title","text"]
+- Files count: 0
+- File details: NONE
+- Magic detection: NONE
+[2026-09-26T16:07:04.956Z] POST /share-target:
+- Form fields: ["title","text"]
+- Files count: 0
+- File details: NONE
+- Magic detection: NONE
+[2026-09-26T16:07:08.664Z] POST /share-target:
+- Form fields: ["text"]
+- Files count: 1
+- File details: audio, whatsapp_audio.opus, audio/ogg, size=347
+- Magic detection: {"isVideo":false,"mime":"audio/ogg","ext":"opus"}
+[2026-09-26T16:34:32.345Z] POST /share-target:
+- Form fields: []
+- Files count: 1
+- File details: audio, whatsapp_voice.opus, audio/ogg, size=412161
+- Magic detection: NONE
+[2026-09-26T16:34:57.547Z] POST /share-target:
+- Form fields: ["title","text"]
+- Files count: 0
+- File details: NONE
+- Magic detection: NONE
+[2026-09-26T16:35:04.981Z] POST /share-target:
+- Form fields: ["text"]
+- Files count: 1
+- File details: audio, voice_recording.opus, audio/ogg, size=412161
+- Magic detection: NONE
+[2026-09-26T17:33:16.290Z] POST /share-target:
+- Form fields: ["text"]
+- Body values: {"text":"Ahmad"}
+- Files count: 1
+- File details: audio, whatsapp-voice.opus, audio/ogg, size=412161
+- Magic detection: NONE
+[SHARE sh_srv_muipftek_fkc3it]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=server&id=sh_srv_muipftek_fkc3it
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muipg3mm_7dmme1]
+POST_RECEIVED
+NO_FILE_FOUND
+FORM_FIELDS=["title","text"]
+REDIRECT=/?shared=nofile
+[SHARE sh_srv_muipuwqm_ftt9f4]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice-message.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=server&id=sh_srv_muipuwqm_ftt9f4
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muir64ek_2eqedw]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=sw&id=sh_srv_muir64ek_2eqedw
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muir6d3n_ekkvib]
+POST_RECEIVED
+NO_FILE_FOUND
+FORM_FIELDS=["text"]
+REDIRECT=/?shared=nofile
+[SHARE sh_srv_muirod0o_yyye31]
+POST_RECEIVED
+FILE_FOUND=voice-recording.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=sw&id=sh_srv_muirod0o_yyye31
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muirogd4_p9lime]
+POST_RECEIVED
+NO_FILE_FOUND
+FORM_FIELDS=["text"]
+REDIRECT=/?shared=nofile
+[SHARE sh_txt_muiron43_a5tqpc]
+POST_RECEIVED
+TEXT_ONLY_FOUND: length=60
+TEXT_PREVIEW="السلام عليكم يا شيخ ما حكم صيام الست من شوال قبل قضاء رمضان؟"
+REDIRECT=/?shared=text&id=sh_txt_muiron43_a5tqpc
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mujzh36l_9enoqd]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=sw&id=sh_srv_mujzh36l_9enoqd
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mujzioku_qhqrkv]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=sw&id=sh_srv_mujzioku_qhqrkv
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mujzka2c_uo2dux]
+POST_RECEIVED
+FILE_FOUND=fatwa-sheikh.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=sw&id=sh_srv_mujzka2c_uo2dux
+STATUS=READY_FOR_CLIENT

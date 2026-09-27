@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidFatwaBase(data) {
+      return data.id is string
+        && data.id.size() > 0
+        && data.fatwaNumber is number
+        && data.fatwaNumber > 0
+        && (data.question_clean is string || data.question_original is string)
+        && (data.answer_clean is string || data.transcription_raw is string)
+        && data.version is number
+        && data.version >= 1;
+    }
+
+    // Canonical collection of Sheikh Dr. Abdul Bari Khalla fatwas
+    match /fatwas/{fatwaId} {
+      // Public read access for archive visitors, students, and transcriptionists
+      allow read: if true;
+
+      // Controlled creation with strict schema validation and document ID binding
+      allow create: if isValidFatwaBase(request.resource.data)
+                    && request.resource.data.id == fatwaId;
+
+      // Controlled updates:
+      // 1. Must preserve document ID
+      // 2. Version must strictly increase monotonically (preventing stale overwrites)
+      // 3. fatwaNumber is strictly immutable (protecting citation integrity)
+      // 4. Stale writes cannot resurrect a deleted document
+      allow update: if request.resource.data.id == resource.data.id
+                    && request.resource.data.version is number
+                    && request.resource.data.version > resource.data.version
+                    && request.resource.data.fatwaNumber == resource.data.fatwaNumber
+                    && !(resource.data.deleted == true && request.resource.data.deleted != true);
+
+      // Hard deletions are strictly forbidden; deletions MUST use versioned tombstones (deleted: true)
+      allow delete: if false;
+    }
+
+    // Atomic metadata counters and sequences (e.g. fatwa_sequence)
+    match /metadata/{docId} {
+      // Public read access for sequence queries
+      allow read: if true;
+
+      // Creation with positive sequence
+      allow create: if request.resource.data.lastSequence is number
+                    && request.resource.data.lastSequence > 0;
+
+      // Monotonic sequence: sequence must NEVER decrease
+      allow update: if request.resource.data.lastSequence is number
+                    && request.resource.data.lastSequence >= resource.data.lastSequence;
+
+      allow delete: if false;
+    }
+  }
+}
+

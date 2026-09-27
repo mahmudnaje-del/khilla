@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "fatwa": {
+      "title": "Fatwa",
+      "description": "Fatwa document containing audio question, transcription, answer, vocalization, and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique stable identifier for the fatwa document" },
+        "fatwaNumber": { "type": "number", "description": "Sequential immutable fatwa number" },
+        "question_original": { "type": "string", "description": "Original transcription or text of question" },
+        "question_clean": { "type": "string", "description": "Polished and polite Arabic question" },
+        "transcription_raw": { "type": "string", "description": "Literal speech-to-text transcript of answer" },
+        "answer_clean": { "type": "string", "description": "Polished answer strictly faithful to recording" },
+        "answer_tashkeel": { "type": "string", "description": "Full Arabic vocalized diacritics of the answer" },
+        "fatwaType": { "type": "string", "description": "Type of fatwa: normal or moasala", "enum": ["normal", "moasala"] },
+        "mediaType": { "type": "string", "description": "Source media format: audio, video, or text", "enum": ["audio", "video", "text"] },
+        "status": { "type": "string", "description": "Status of the fatwa: مسودة, تحتاج مراجعة, مراجعة, معتمدة, منشورة" },
+        "reviewed": { "type": "boolean", "description": "Whether reviewed" },
+        "approved": { "type": "boolean", "description": "Whether approved by Sheikh or admin" },
+        "category": { "type": "string", "description": "Jurisprudential category" },
+        "tags": { "type": "array", "description": "List of keywords or topic tags" },
+        "has_wallahu_aalam": { "type": "boolean", "description": "Whether concludes with Wallahu Aalam" },
+        "evidence_citations": { "type": "array", "description": "Extracted Quranic verses and Hadith citations" },
+        "unclear_segments": { "type": "array", "description": "Segments requiring clarification" },
+        "editing_notes": { "type": "array", "description": "Editorial remarks and transcription audit log" },
+        "template_settings": { "type": "object", "description": "Graphic card template settings and typography" },
+        "version": { "type": "number", "description": "Monotonically increasing version counter for OCC" },
+        "deleted": { "type": "boolean", "description": "Soft-deletion tombstone indicator" },
+        "created_at": { "type": "string", "description": "ISO creation date" },
+        "updated_at": { "type": "string", "description": "ISO last update date" }
+      },
+      "required": ["fatwaNumber", "question_clean", "answer_clean", "status"]
+    }
+  },
+  "firestore": {
+    "/fatwas/{fatwaId}": {
+      "schema": "fatwa",
+      "description": "Collection of all fatwas"
+    },
+    "/metadata/{docId}": {
+      "schema": "metadata",
+      "description": "Global atomic sequences and metadata counters"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "مفرّغ فتاوى الشيخ د. عبد الباري خلة",
+  "description": "منصة احترافية لتفريغ وترتيب ونشر فتاوى فضيلة الشيخ د. عبد الباري خلة بدقة وأمانة علمية تامة وبدون تغيير للمعنى",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
