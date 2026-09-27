@@ -24,12 +24,45 @@
     "params": {
       "title": "title",
       "text": "text",
+      "url": "url",
       "files": [
         {
           "name": "media",
-          "accept": ["*/*", "audio/*", "video/*", "audio/ogg", "audio/ogg; codecs=opus", "application/ogg", "application/octet-stream", ".opus", ".ogg", ".mp3", ".m4a", ".wav", ".amr", ".mp4"]
+          "accept": [
+            "audio/*",
+            "video/*",
+            "application/ogg",
+            "application/octet-stream",
+            "audio/ogg",
+            "audio/opus",
+            "audio/mpeg",
+            "audio/mp4",
+            "audio/wav",
+            "audio/aac",
+            "audio/amr",
+            "audio/3gpp"
+          ]
         }
       ]
     }
+  },
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "audio/ogg": [".opus", ".ogg", ".oga"],
+        "audio/mpeg": [".mp3"],
+        "audio/mp4": [".m4a", ".mp4"],
+        "audio/wav": [".wav"],
+        "audio/aac": [".aac", ".amr"],
+        "audio/3gpp": [".3gp"],
+        "application/ogg": [".opus", ".ogg"],
+        "application/octet-stream": [".opus", ".ogg", ".amr"],
+        "video/mp4": [".mp4"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
   }
 }

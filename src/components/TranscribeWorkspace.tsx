@@ -40,7 +40,7 @@ import {
 import { fileToBase64, formatDuration, formatFileSize, createSampleAudioTone } from "../utils/audioHelper";
 import { Fatwa, TranscribeResponse } from "../types";
 import { DEFAULT_TEMPLATE_SETTINGS } from "../utils/storage";
-import { wasOpenedFromShare, getShareTargetInfo, getSharedOpusAudio, getSharedText, SharedOpusResult } from "../utils/shareTarget";
+import { wasOpenedFromShare, getShareTargetInfo, getSharedText, waitForSharedOpus, listenForOpenedFiles, markShareMissed, clearPendingShare, chromeDropsShareFiles, usableSharedQuestionText } from "../utils/shareTarget";
 import ThinkingLogo from "./ThinkingLogo";
 import { WordImportModal } from "./WordImportModal";
 import {
@@ -139,6 +139,7 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
 
   // Processing & result state
   const [isReceivingShare, setIsReceivingShare] = useState(false);
+  const [shareBlocked, setShareBlocked] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState<number>(1);
   const [retryCount, setRetryCount] = useState<number>(0);
@@ -207,11 +208,17 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
     if (isProcessingShareRef.current) return;
     isProcessingShareRef.current = true;
 
+    const finishLaunch = (ok: boolean) => {
+      if (ok) clearPendingShare();
+      else markShareMissed();
+      if (window.location.search) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+
     activeProcessingPromiseRef.current = (async () => {
       const shareInfo = getShareTargetInfo();
-      window.history.replaceState({}, "", window.location.pathname);
 
-      // 1. في حال كانت المشاركة عبارة عن نص (سؤال السائل أو منشور من واتساب)
       if (shareInfo.type === "text") {
         setIsReceivingShare(true);
         setErrorMessage(null);
@@ -231,7 +238,9 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
               setQuestion(sanitizeQuestionGreeting(trimmed));
               showToast("تم استلام نص السؤال من واتساب بنجاح 📝. يرجى اختيار تسجيل جواب الشيخ أدناه.", "success");
             }
+            setShareBlocked(false);
             setErrorMessage(null);
+            finishLaunch(true);
             return;
           }
         } catch (txtErr) {
@@ -241,38 +250,49 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
           isProcessingShareRef.current = false;
           activeProcessingPromiseRef.current = null;
         }
+        finishLaunch(false);
+        return;
       }
 
-      // 2. مشاركة تسجيل صوتي .opus
+      if (shareInfo.type === "empty") {
+        setShareBlocked(true);
+        setIsReceivingShare(false);
+        finishLaunch(false);
+        showToast("واتساب فتح التطبيق دون ملف التسجيل. اختر الملف من الهاتف.", "info");
+        isProcessingShareRef.current = false;
+        activeProcessingPromiseRef.current = null;
+        return;
+      }
+
       setIsReceivingShare(true);
       setErrorMessage(null);
-      showToast("جارٍ استلام تسجيل الواتساب (.opus)...", "info");
+      setShareBlocked(false);
 
       try {
-        let shared: SharedOpusResult | null = null;
-        for (let i = 0; i < 6; i++) {
-          shared = await getSharedOpusAudio();
-          if (shared && shared.file && shared.file.size > 0) break;
-          await new Promise((r) => setTimeout(r, 120));
-        }
+        const shared = await waitForSharedOpus({ attempts: 8, delayMs: 180 });
 
-        if (shared && shared.file) {
+        if (shared && shared.file && shared.file.size > 0) {
           await handleFileSelect(shared.file);
-          if (shared.text && !question.trim()) {
-            const ext = extractWhatsAppQAndA(shared.text.trim());
-            if (ext.question) {
-              setQuestion(ext.question);
-            }
+          const caption = usableSharedQuestionText(shared.text);
+          if (caption && !question.trim()) {
+            const ext = extractWhatsAppQAndA(caption);
+            if (ext.question) setQuestion(ext.question);
+            else setQuestion(sanitizeQuestionGreeting(caption));
           }
           setErrorMessage(null);
-          showToast(`تم استلام تسجيل واتساب (${shared.name}) بنجاح 🎙️ (جاهز للتفريغ)`, "success");
+          setShareBlocked(false);
+          finishLaunch(true);
+          showToast(`تم استلام تسجيل واتساب (${shared.name}) بنجاح 🎙️`, "success");
           return;
         }
 
-        // إذا تم فتح التطبيق من واتساب ولكن لم يصل الملف بعد، نوجه المستخدم بلطف
-        showToast("وصل أمر المشاركة من واتساب. يرجى النقر على زر اختيار التسجيل (.opus) أدناه", "info");
+        setShareBlocked(true);
+        finishLaunch(false);
+        showToast("لم يصل ملف التسجيل. يمكنك اختياره يدوياً من الهاتف.", "info");
       } catch (err) {
         console.error("Error receiving share:", err);
+        setShareBlocked(true);
+        finishLaunch(false);
       } finally {
         setIsReceivingShare(false);
         isProcessingShareRef.current = false;
@@ -285,11 +305,14 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
 
   useEffect(() => {
     processIncomingShare();
+    listenForOpenedFiles((file) => {
+      setShareBlocked(false);
+      handleFileSelect(file);
+      showToast(`تم فتح التسجيل (${file.name}) وجاهز للتفريغ`, "success");
+    });
 
     const handleWindowActive = () => {
-      if (wasOpenedFromShare()) {
-        processIncomingShare();
-      }
+      if (wasOpenedFromShare()) processIncomingShare();
     };
 
     window.addEventListener("focus", handleWindowActive);
@@ -1436,11 +1459,36 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
+                    setShareBlocked(false);
                     handleFileSelect(e.target.files[0]);
                   }
                   e.target.value = "";
                 }}
               />
+
+              {shareBlocked && !audioFile && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-right space-y-2.5">
+                  <p className="font-bold font-cairo text-amber-950 text-sm">وصل أمر المشاركة، لكن ملف التسجيل لم يصل</p>
+                  <p className="text-xs sm:text-sm text-amber-900 leading-relaxed">
+                    {chromeDropsShareFiles()
+                      ? "كروم 153 على أندرويد يسقط ملف الصوت عند المشاركة إلى التطبيق المثبت، ويُبقي النص فقط. تحديث كروم إلى الإصدار 154 أو أحدث يرجّع المشاركة المباشرة من واتساب."
+                      : "واتساب فتح المفرّغ دون إرفاق ملف الصوت. اختر التسجيل من الهاتف وسيُجهَّز للتفريغ فوراً."}
+                  </p>
+                  <ol className="text-xs sm:text-sm text-amber-900 list-decimal pr-5 space-y-1 leading-relaxed">
+                    <li>في واتساب اضغط مطولاً على الرسالة الصوتية.</li>
+                    <li>اختر مشاركة ثم احفظها في الملفات، أو ابحث عن ملف .opus داخل مجلد WhatsApp Voice Notes.</li>
+                    <li>ارجع هنا واضغط الزر واختر الملف.</li>
+                  </ol>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold font-cairo text-sm cursor-pointer"
+                  >
+                    <UploadCloud className="w-4 h-4" />
+                    اختيار التسجيل من الهاتف
+                  </button>
+                </div>
+              )}
 
               {/* Upload Drop Area or Active Audio/Video */}
               {!audioFile && !isRecording ? (

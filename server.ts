@@ -158,9 +158,25 @@ const FATWA_SYSTEM_INSTRUCTION = `أنت مفرغ صوتي ومحرر نصوص �
 app.get(["/manifest.webmanifest", "/manifest.json"], (req, res) => {
   res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const manifestPath = path.join(process.cwd(), "public", "manifest.webmanifest");
-  res.sendFile(manifestPath);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
+  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").split(",")[0].trim();
+  if (host) {
+    const origin = `${proto}://${host}`;
+    if (manifest.share_target && typeof manifest.share_target.action === "string" && manifest.share_target.action.startsWith("/")) {
+      manifest.share_target.action = origin + manifest.share_target.action;
+    }
+    if (Array.isArray(manifest.file_handlers)) {
+      for (const handler of manifest.file_handlers) {
+        if (handler && typeof handler.action === "string" && handler.action.startsWith("/")) {
+          handler.action = origin + handler.action;
+        }
+      }
+    }
+  }
+  res.json(manifest);
 });
 
 // Explicit Service Worker route with headers
@@ -1373,6 +1389,170 @@ function normalizeGeminiMime(rawMime: string | undefined, isVideo: boolean): str
   return "audio/ogg";
 }
 
+const SHARE_CACHE_NAME = "khilla-shared-media-v19";
+const SHARE_DB_NAME = "khilla-share-v19";
+const SHARE_INLINE_MAX_BYTES = 8 * 1024 * 1024;
+
+function renderShareHandoffPage(opts: {
+  shareId: string;
+  kind: "opus" | "text";
+  fileName?: string;
+  mimeType?: string;
+  isVideo?: boolean;
+  text?: string;
+  base64?: string;
+}): string {
+  const next =
+    opts.kind === "text"
+      ? `/?shared=text&id=${encodeURIComponent(opts.shareId)}`
+      : `/?shared=opus&id=${encodeURIComponent(opts.shareId)}`;
+  const title = opts.kind === "text" ? "جارٍ استلام السؤال..." : "جارٍ استلام التسجيل...";
+  const label = opts.kind === "text" ? "جارٍ إدراج نص السؤال..." : "جارٍ تجهيز التسجيل الصوتي...";
+  const payload = {
+    shareId: opts.shareId,
+    kind: opts.kind,
+    fileName: opts.fileName || "",
+    mimeType: opts.mimeType || "",
+    isVideo: Boolean(opts.isVideo),
+    text: opts.text || "",
+    base64: opts.base64 || "",
+    cacheName: SHARE_CACHE_NAME,
+    dbName: SHARE_DB_NAME,
+    next,
+  };
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="8;url=${next}">
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #faf7f2; color: #1b2a41; text-align: center; }
+    .box { padding: 24px; border-radius: 20px; background: white; box-shadow: 0 10px 30px rgba(0,0,0,0.06); max-width: 320px; border: 1px solid #e7e0d6; }
+    .loader { width: 40px; height: 40px; border: 3px solid #e2d9cc; border-top-color: #0c392c; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="loader"></div>
+    <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">${label}</div>
+    <div style="font-size: 12px; color: #666;">يتم نقله للمشغل الآن</div>
+  </div>
+  <script>
+    (async function () {
+      var p = ${JSON.stringify(payload)};
+      try {
+        sessionStorage.setItem("khilla-pending-share", JSON.stringify({
+          shared: p.kind === "text" ? "text" : "opus",
+          id: p.shareId,
+          at: Date.now()
+        }));
+      } catch (e) {}
+      var blob = null;
+      if (p.base64) {
+        try {
+          var bin = atob(p.base64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          blob = new Blob([bytes], { type: p.mimeType || "audio/ogg" });
+        } catch (e) {}
+      }
+      var meta = {
+        id: p.shareId,
+        name: p.fileName,
+        size: blob ? blob.size : 0,
+        mimeType: p.mimeType || (p.kind === "text" ? "text/plain" : "audio/ogg"),
+        isVideo: p.isVideo,
+        text: p.text || "",
+        receivedAt: Date.now(),
+        source: "SERVER_BRIDGE"
+      };
+      try {
+        if ("caches" in window) {
+          var cache = await caches.open(p.cacheName);
+          var jobs = [
+            cache.put("/__shared_opus_meta__", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }))
+          ];
+          if (blob) {
+            jobs.push(cache.put("/__shared_opus_media__", new Response(blob, {
+              headers: { "Content-Type": meta.mimeType, "X-Share-Id": p.shareId }
+            })));
+          }
+          await Promise.all(jobs);
+        }
+      } catch (e) {}
+      try {
+        await new Promise(function (resolve) {
+          var req = indexedDB.open(p.dbName, 1);
+          req.onerror = function () { resolve(false); };
+          req.onupgradeneeded = function () {
+            if (!req.result.objectStoreNames.contains("media")) req.result.createObjectStore("media");
+          };
+          req.onsuccess = function () {
+            try {
+              var tx = req.result.transaction("media", "readwrite");
+              tx.oncomplete = function () { resolve(true); };
+              tx.onerror = function () { resolve(false); };
+              tx.objectStore("media").put({ blob: blob, meta: meta }, "latest");
+            } catch (err) { resolve(false); }
+          };
+        });
+      } catch (e) {}
+      location.replace(p.next);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+function loadSharedMediaFromDisk(id: string): StoredSharedMedia | null {
+  if (!id || !/^[a-zA-Z0-9_\-]+$/.test(id) || id.length > 64) return null;
+  try {
+    const metaPath = path.join(SHARED_MEDIA_DIR, `${id}.json`);
+    const binPath = path.join(SHARED_MEDIA_DIR, `${id}.bin`);
+    if (!fs.existsSync(metaPath) || !fs.existsSync(binPath)) return null;
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    const buf = fs.readFileSync(binPath);
+    const item: StoredSharedMedia = {
+      id: meta.id || id,
+      name: meta.name || "whatsapp-voice.opus",
+      mimetype: meta.mimetype || "audio/ogg",
+      size: meta.size || buf.length,
+      buffer: buf,
+      text: meta.text || "",
+      isVideo: Boolean(meta.isVideo),
+      timestamp: meta.timestamp || Date.now(),
+    };
+    serverSharedMediaStore.set(id, item);
+    return item;
+  } catch {
+    return null;
+  }
+}
+
+function loadLatestSharedMedia(): StoredSharedMedia | null {
+  const mem = serverSharedMediaStore.get("latest_opus");
+  if (mem && mem.buffer && mem.buffer.length > 0) return mem;
+  try {
+    const pointerPath = path.join(SHARED_MEDIA_DIR, "latest.json");
+    if (fs.existsSync(pointerPath)) {
+      const pointer = JSON.parse(fs.readFileSync(pointerPath, "utf-8"));
+      if (pointer && typeof pointer.id === "string") {
+        const fromPointer = loadSharedMediaFromDisk(pointer.id);
+        if (fromPointer) {
+          serverSharedMediaStore.set("latest_opus", fromPointer);
+          return fromPointer;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 // استقبال المشاركة عبر الخادم (يتولى كافة طلبات multipart من أندرويد وواتساب)
 app.post("/share-target", (req, res) => {
   shareUpload.any()(req, res, (err) => {
@@ -1443,49 +1623,12 @@ STATUS=READY_FOR_CLIENT
 
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          return res.send(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <title>جارٍ استلام السؤال...</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #faf7f2; color: #1b2a41; text-align: center; }
-    .box { padding: 24px; border-radius: 20px; background: white; box-shadow: 0 10px 30px rgba(0,0,0,0.06); max-width: 320px; border: 1px solid #e7e0d6; }
-    .loader { width: 40px; height: 40px; border: 3px solid #e2d9cc; border-top-color: #0c392c; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div class="loader"></div>
-    <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">جارٍ إدراج نص السؤال...</div>
-  </div>
-  <script>
-    (async function() {
-      const shareId = ${JSON.stringify(textShareId)};
-      const textVal = ${JSON.stringify(sharedText)};
-      try {
-        if ("caches" in window) {
-          const cache = await caches.open("khilla-shared-media-v16");
-          const meta = {
-            id: shareId,
-            name: "",
-            size: 0,
+          return res.send(renderShareHandoffPage({
+            shareId: textShareId,
+            kind: "text",
+            text: sharedText,
             mimeType: "text/plain",
-            isVideo: false,
-            text: textVal,
-            receivedAt: Date.now(),
-            source: "SERVER_BRIDGE"
-          };
-          await cache.put("/__shared_opus_meta__", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
-        }
-      } catch (_) {}
-      window.location.replace("/?shared=text");
-    })();
-  </script>
-</body>
-</html>`);
+          }));
         }
 
         console.warn(`[SHARE ${shareId}] No audio or video file or text received in payload. Form fields:`, Object.keys(req.body || {}));
@@ -1494,11 +1637,11 @@ STATUS=READY_FOR_CLIENT
 POST_RECEIVED
 NO_FILE_FOUND
 FORM_FIELDS=${JSON.stringify(Object.keys(req.body || {}))}
-REDIRECT=/?shared=empty
+REDIRECT=/?shared=empty&reason=no_file
 `;
           fs.appendFileSync(path.join(DATA_DIR, "share_incoming.log"), logData);
         } catch (_) {}
-        return res.redirect(303, "/?shared=empty");
+        return res.redirect(303, "/?shared=empty&reason=no_file");
       }
 
       // تحديد هل هو فيديو أم صوت
@@ -1573,6 +1716,11 @@ REDIRECT=/?shared=error&msg=file_too_large
           ),
           "utf-8"
         );
+        fs.writeFileSync(
+          path.join(SHARED_MEDIA_DIR, "latest.json"),
+          JSON.stringify({ id: shareId, timestamp: mediaItem.timestamp }),
+          "utf-8"
+        );
       } catch (diskErr) {
         console.warn("Notice: could not persist shared media to disk:", diskErr);
       }
@@ -1586,90 +1734,27 @@ MIME=${detectedMime}
 SOURCE=whatsapp
 STORAGE=server-local+client-bridge
 MAGIC_DETECTED=${detectedMagic ? JSON.stringify(detectedMagic) : "NONE"}
-REDIRECT=/?shared=sw&id=${shareId}
+REDIRECT=/?shared=opus&id=${shareId}
 STATUS=READY_FOR_CLIENT
 `;
         fs.appendFileSync(path.join(DATA_DIR, "share_incoming.log"), logData);
       } catch (_) {}
 
-      // إذا كان الملف في حدود 25 ميغابايت، نرسل جسر التحويل المباشر (Handoff Bridge)
-      // الذي يكتب الملف فوراً في CacheStorage في متصفح المستخدم ثم يوجهه محلياً لـ /?shared=sw&id=...
-      // هذا يضمن 100% عدم تأثر الملف بتعدد حاويات السحابة في Cloud Run
-      const base64Data = file.buffer.toString("base64");
-      const safeFileName = JSON.stringify(finalName);
-      const safeMime = JSON.stringify(detectedMime);
-      const safeId = JSON.stringify(shareId);
-      const isVid = isVideoMedia ? "true" : "false";
+      // جسر التسليم: الملف يُكتب في IndexedDB وCache داخل جهاز المستخدم
+      // ثم تُفتح الصفحة ومعها معرّف المشاركة حتى لو تغيّرت حاوية Cloud Run.
+      const inlineBase64 = file.buffer.length <= SHARE_INLINE_MAX_BYTES ? file.buffer.toString("base64") : "";
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      return res.send(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <title>جارٍ استلام التسجيل...</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #faf7f2; color: #1b2a41; text-align: center; }
-    .box { padding: 24px; border-radius: 20px; background: white; box-shadow: 0 10px 30px rgba(0,0,0,0.06); max-width: 320px; border: 1px solid #e7e0d6; }
-    .loader { width: 40px; height: 40px; border: 3px solid #e2d9cc; border-top-color: #0c392c; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div class="loader"></div>
-    <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">جارٍ تجهيز التسجيل الصوتي...</div>
-    <div style="font-size: 12px; color: #666;">يتم نقله للمشغل الآن</div>
-  </div>
-  <script>
-    (async function() {
-      const shareId = ${safeId};
-      const fileName = ${safeFileName};
-      const mimeType = ${safeMime};
-      const isVideo = ${isVid};
-      const base64 = "${base64Data}";
-      
-      try {
-        const binStr = atob(base64);
-        const len = binStr.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binStr.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: mimeType });
-
-        if ("caches" in window) {
-          const cache = await caches.open("khilla-shared-media-v16");
-          const meta = {
-            id: shareId,
-            name: fileName,
-            size: len,
-            mimeType: mimeType,
-            isVideo: isVideo,
-            text: ${JSON.stringify(sharedText)},
-            receivedAt: Date.now(),
-            source: "SERVER_BRIDGE"
-          };
-
-          await Promise.all([
-            cache.put("/__shared_opus_media__", new Response(blob, {
-              headers: { "Content-Type": mimeType, "Content-Length": String(len), "X-Share-Id": shareId }
-            })),
-            cache.put("/__shared_opus_meta__", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } })),
-          ]);
-
-          window.location.replace("/?shared=opus");
-          return;
-        }
-      } catch (err) {
-        console.warn("Client bridge write failed:", err);
-      }
-      window.location.replace("/?shared=opus");
-    })();
-  </script>
-</body>
-</html>`);
+      return res.send(renderShareHandoffPage({
+        shareId,
+        kind: "opus",
+        fileName: finalName,
+        mimeType: detectedMime,
+        isVideo: isVideoMedia,
+        text: sharedText,
+        base64: inlineBase64,
+      }));
     } catch (handlerErr) {
       console.error("Error processing share-target POST:", handlerErr);
       return res.redirect(303, "/?shared=error&msg=server_process_err");
@@ -1719,11 +1804,12 @@ app.post("/api/share-ingest", (req, res) => {
 });
 
 app.get("/api/latest-opus", (req, res) => {
-  const item = serverSharedMediaStore.get("latest_opus");
+  const item = loadLatestSharedMedia();
   if (!item) return res.status(404).json({ success: false, error: "No shared opus audio available" });
-  res.setHeader("Content-Type", item.mimetype);
+  res.setHeader("Content-Type", item.mimetype || "audio/ogg");
   res.setHeader("Content-Length", item.buffer.length);
-  res.setHeader("Content-Disposition", `inline; filename="${item.name}"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(item.name)}"`);
   return res.send(item.buffer);
 });
 
