@@ -10,36 +10,12 @@
   "theme_color": "#1b2a41",
   "lang": "ar",
   "dir": "rtl",
-  "categories": [
-    "utilities",
-    "productivity",
-    "education"
-  ],
+  "categories": ["utilities", "productivity", "education"],
   "icons": [
-    {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-512-maskable.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+    {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
   ],
   "id": "/",
   "share_target": {
@@ -52,22 +28,11 @@
       "files": [
         {
           "name": "audio",
-          "accept": [
-            "audio/*",
-            "video/*",
-            "audio/ogg",
-            "audio/opus",
-            "application/ogg",
-            "application/octet-stream",
-            ".opus",
-            ".ogg",
-            ".mp3",
-            ".m4a",
-            ".wav",
-            ".amr",
-            ".3gp",
-            ".mp4"
-          ]
+          "accept": ["audio/*", "video/*", "audio/ogg", "audio/opus", "application/ogg", "application/octet-stream", ".opus", ".ogg", ".mp3", ".m4a", ".wav", ".amr", ".3gp", ".mp4"]
+        },
+        {
+          "name": "file",
+          "accept": ["audio/*", "video/*", "application/ogg", "application/octet-stream", ".opus", ".ogg", ".mp3", ".m4a", ".wav", ".amr", ".3gp", ".mp4"]
         }
       ]
     }
