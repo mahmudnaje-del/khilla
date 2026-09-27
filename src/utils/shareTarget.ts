@@ -1,11 +1,10 @@
 /**
  * shareTarget.ts
- * استلام مشاركات واتساب (تسجيل صوتي + كابشن)
- * الإصدار: khilla-pwa-v16
+ * مشاركة واتساب = تسجيل صوتي فقط. لا يُستخدم اسم المرسل ولا كابشن واتساب كسؤال.
+ * khilla-pwa-v17
  */
 
-const OPUS_CACHE_NAME = "khilla-shared-media-v16";
-const LEGACY_CACHE_NAMES = ["khilla-shared-media-v15", "khilla-shared-media-v16"];
+const LEGACY_CACHE_NAMES = ["khilla-shared-media-v15", "khilla-shared-media-v16", "khilla-shared-media-v17"];
 
 export interface SharedOpusResult {
   file: File;
@@ -25,22 +24,22 @@ export function isWhatsAppVoiceCaption(text: string | null | undefined): boolean
   if (!text || typeof text !== "string") return false;
   const t = text.trim();
   if (!t) return false;
-  if (t.length > 180) return false;
+  if (t.length > 220) return false;
+  if (/\bمن\s+\S+/.test(t) && t.length < 120 && !t.includes("؟") && !t.includes("?")) {
+    if (/^(?:مقطع|رسالة|تسجيل|فيديو)/.test(t)) return true;
+  }
   if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من\b/i.test(t)) return true;
   if (/^Voice\s+(?:message|note)\s+from\b/i.test(t)) return true;
   if (/^Audio(?:\s+message)?\s+from\b/i.test(t)) return true;
   if (/^Video\s+from\b/i.test(t)) return true;
-  if (/^PTT[-_\s]/i.test(t)) return true;
-  if (/^AUD[-_\s]/i.test(t)) return true;
+  if (/^PTT[-_\s]/i.test(t) || /^AUD[-_\s]/i.test(t)) return true;
   if (/\.(?:opus|ogg|oga|amr|m4a|mp3|wav)$/i.test(t) && t.length < 80) return true;
   return false;
 }
 
-export function usableSharedQuestionText(text: string | null | undefined): string {
-  if (!text) return "";
-  const t = text.trim();
-  if (!t || isWhatsAppVoiceCaption(t)) return "";
-  return t;
+/** لا نستخدم نص واتساب كسؤال أبداً عند مشاركة تسجيل */
+export function usableSharedQuestionText(_text: string | null | undefined): string {
+  return "";
 }
 
 export function wasOpenedFromShare(): boolean {
@@ -54,9 +53,8 @@ export function getShareTargetInfo(): ShareInfo {
   const p = new URLSearchParams(window.location.search);
   const shared = p.get("shared");
   if (!shared && !p.get("id")) return { isShare: false, type: null };
-  if (shared === "opus" || shared === "sw" || shared === "server") return { isShare: true, type: "opus" };
-  if (shared === "text") return { isShare: true, type: "text" };
-  return { isShare: true, type: "empty" };
+  // أي مشاركة من واتساب تُعامل كمحاولة استلام تسجيل، وليس نص سؤال
+  return { isShare: true, type: "opus" };
 }
 
 async function readFromCache(cacheName: string): Promise<SharedOpusResult | null> {
@@ -68,20 +66,28 @@ async function readFromCache(cacheName: string): Promise<SharedOpusResult | null
   if (!mediaRes) return null;
   const blob = await mediaRes.blob();
   if (!blob || blob.size <= 0) return null;
-  let meta = { name: "whatsapp-voice.opus", mimeType: blob.type || "audio/ogg; codecs=opus", isVideo: false, text: "" };
+  let meta = { name: "whatsapp-voice.opus", mimeType: blob.type || "audio/ogg; codecs=opus", isVideo: false };
   if (metaRes) {
     try {
       const parsed = await metaRes.json();
       if (parsed.name) meta.name = parsed.name;
       if (parsed.mimeType) meta.mimeType = parsed.mimeType;
       if (parsed.isVideo !== undefined) meta.isVideo = Boolean(parsed.isVideo);
-      if (parsed.text) meta.text = parsed.text;
     } catch (_) {}
   }
-  const file = new File([blob], meta.name || "whatsapp-voice.opus", { type: meta.mimeType || blob.type || "audio/ogg; codecs=opus" });
+  const file = new File([blob], meta.name || "whatsapp-voice.opus", {
+    type: meta.mimeType || blob.type || "audio/ogg; codecs=opus",
+  });
   cache.delete("/__shared_opus_media__").catch(() => {});
   cache.delete("/__shared_opus_meta__").catch(() => {});
-  return { file, name: file.name, size: file.size, mimeType: file.type, isVideo: meta.isVideo, text: usableSharedQuestionText(meta.text) };
+  return {
+    file,
+    name: file.name,
+    size: file.size,
+    mimeType: file.type,
+    isVideo: meta.isVideo,
+    text: "",
+  };
 }
 
 export async function getSharedOpusAudio(): Promise<SharedOpusResult | null> {
@@ -95,7 +101,8 @@ export async function getSharedOpusAudio(): Promise<SharedOpusResult | null> {
       }
     }
   }
-  const shareId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null;
+  const shareId =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null;
   const endpoints = ["/api/latest-opus"];
   if (shareId) endpoints.unshift(`/api/shared-file/${encodeURIComponent(shareId)}/raw`);
   for (const url of endpoints) {
@@ -113,24 +120,14 @@ export async function getSharedOpusAudio(): Promise<SharedOpusResult | null> {
 }
 
 export async function getSharedText(): Promise<string | null> {
-  if (typeof window === "undefined" || !("caches" in window)) return null;
-  for (const name of LEGACY_CACHE_NAMES) {
-    try {
-      const cache = await caches.open(name);
-      const metaRes = await cache.match("/__shared_opus_meta__");
-      if (!metaRes) continue;
-      const data = await metaRes.json();
-      const text = usableSharedQuestionText(data?.text);
-      if (text) {
-        cache.delete("/__shared_opus_meta__").catch(() => {});
-        return text;
-      }
-    } catch (_) {}
-  }
+  // مشاركة التسجيل لا تُدخل أي نص في خانة السؤال
   return null;
 }
 
-export async function waitForSharedOpus(options?: { attempts?: number; delayMs?: number }): Promise<SharedOpusResult | null> {
+export async function waitForSharedOpus(options?: {
+  attempts?: number;
+  delayMs?: number;
+}): Promise<SharedOpusResult | null> {
   const attempts = options?.attempts ?? 24;
   const delayMs = options?.delayMs ?? 250;
   for (let i = 0; i < attempts; i++) {
