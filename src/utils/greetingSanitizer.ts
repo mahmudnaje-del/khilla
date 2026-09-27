@@ -1,86 +1,67 @@
 /**
- * Utility functions for sanitizing and validating Fatwa Question Greetings and
- * strictly isolating Questions from Sheikh's Answers.
- * Prevents and corrects the issue where a question is erroneously formatted with "وعليكم السلام"
- * or where the transcriber blends the Sheikh's answer/rulings into the question.
+ * Utility functions for sanitizing Fatwa questions.
+ * WhatsApp voice-share captions like "مقطع صوتي من ..." must never enter the question box.
  */
 
-// Regex patterns for detecting Sheikh's answers or rulings erroneously placed inside the Question
+export function isWhatsAppShareCaption(text: string | undefined | null): boolean {
+  if (!text || typeof text !== "string") return false;
+  const t = text.trim();
+  if (!t || t.length > 220) return false;
+  if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من\b/i.test(t)) return true;
+  if (/^Voice\s+(?:message|note)\s+from\b/i.test(t)) return true;
+  if (/^Audio(?:\s+message)?\s+from\b/i.test(t)) return true;
+  if (/^Video\s+from\b/i.test(t)) return true;
+  if (/^PTT[-_\s]/i.test(t) || /^AUD[-_\s]/i.test(t)) return true;
+  if (/\.(?:opus|ogg|oga|amr|m4a|mp3|wav)$/i.test(t) && t.length < 80) return true;
+  return false;
+}
+
 const ANSWER_BLEED_PATTERNS = [
-  // Phrases like: "والشيخ يذكر أن", "يذكر الشيخ أن", "أجاب الشيخ بأن", "يرى الشيخ أن", "الشيخ يقول:"
   /(?:و\s*)?(?:الشيخ\s+(?:يذكر|يقول|يرى|أجاب|أفتى|أوضح|بيّن|بيقول|بذكر)|(?:يذكر|يقول|يرى|أجاب|أفتى|أوضح|بيّن)\s+الشيخ)\s+(?:أن|بأن|إن|بإن|:)/i,
-  // Phrases like: "قلنا جائز", "قلنا لا يجوز", "قلنا لا حرج"
   /(?:^|[\s\n.؟!؛])(?:قلنا\s+(?:جائز|يجوز|لا يجوز|حلال|حرام|مكروه|لا حرج|صحيح|باطل|نعم|لا|يصح|لا يصح))/i,
-  // Phrases like: "نعم جائز بشرط", "نعم يجوز", "جائز بشرط ألا تتغنى"
   /(?:^|[\s\n.؟!؛])(?:نعم\s+(?:جائز|يجوز|صحيح|يصح|لا حرج)\s*(?:بشرط|إذا|إن|لو)?)/i,
-  // Explicit answer headers: "الجواب:", "فالجواب أن", "جواب الشيخ:", "✍🏻 جواب الشيخ:"
-  /(?:^|[\s\n.؟!؛])(?:فالجواب\s+أن|والجواب\s+أن|والجواب\s+على\s+ذلك|الجواب\s*[:：\/]|جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ\s*[:：]|✍🏻)/i,
-  // Greeting response in middle of text (Sheikh responding to questioner)
-  /(?:[؟?!\n.]\s*|\s{2,})(?:و\s*عليكم\s+السلام)/i,
-  // Endings like "والله أعلم" at the end of the question
+  /(?:^|[\s\n.؟!؛])(?:فالجواب\s+أن|والجواب\s+أن|والجواب\s+على\s+ذلك|الجواب\s*[:：\/]|جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ\s*[:：]|✍️)/i,
+  /(?:[؟?!
+.]\s*|\s{2,})(?:و\s*عليكم\s+السلام)/i,
   /(?:والله\s+أعلم|والله\s+تعالى\s+أعلم)\s*[.!]?$/i,
 ];
 
-/**
- * Checks if a question text contains obvious answer contamination or bleed.
- */
 export function hasAnswerInQuestion(text: string | undefined | null): boolean {
   if (!text || typeof text !== "string") return false;
   const trimmed = text.trim();
   if (trimmed.length < 10) return false;
-
+  if (isWhatsAppShareCaption(trimmed)) return false;
   return ANSWER_BLEED_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-/**
- * Checks if a question text contains the invalid greeting "وعليكم السلام"
- * (which is a response to a greeting and should only be in the Sheikh's answer).
- */
 export function hasQuestionGreetingIssue(text: string | undefined | null): boolean {
   if (!text || typeof text !== "string") return false;
   const trimmed = text.trim();
-  
-  // Checks if question starts with or contains "وعليكم السلام" or "و عليكم السلام"
-  const issueRegex = /(?:^|[\s\n\r.؟!؛*⁉️])(?:و\s*عليكم\s+السلام)/i;
+  const issueRegex = /(?:^|[\s\n\r.؟!؛*‼️])(?:و\s*عليكم\s+السلام)/i;
   return issueRegex.test(trimmed);
 }
 
-/**
- * Sanitizes question text to ensure:
- * 1. It NEVER starts with "وعليكم السلام" (replaces with "السلام عليكم").
- * 2. If copied from a full WhatsApp message containing answer header, strips the answer.
- * 3. Removes noisy prefixes like *⁉️ السؤال:*
- */
 export function sanitizeQuestionGreeting(text: string | undefined | null): string {
   if (!text || typeof text !== "string") return "";
   let q = text.trim();
+  if (!q) return "";
+  if (isWhatsAppShareCaption(q)) return "";
 
-  // If text contains WhatsApp formatted Answer header (e.g. *✍🏻 جواب فضيلة الشيخ:), extract question only
-  const answerHeaderRegex = /\*?✍🏻?\s*(?:جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ|إجابة\s+الشيخ|رد\s+الشيخ|الجواب\s*[:：\/]|ج\s*[:：\/]|\*?الجواب\*?)/i;
+  const answerHeaderRegex = /\*?✍️?\s*(?:جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ|إجابة\s+الشيخ|رد\s+الشيخ|الجواب\s*[:：\/]|ج\s*[:：\/]|\*?الجواب\*?)/i;
   const matchHeader = q.match(answerHeaderRegex);
   if (matchHeader && typeof matchHeader.index === "number") {
     const qPart = q.substring(0, matchHeader.index).trim();
-    if (qPart) {
-      q = qPart;
-    }
+    if (qPart) q = qPart;
   }
 
-  // Remove leading WhatsApp question prefixes like *⁉️ السؤال:* or *السؤال:*
-  q = q.replace(/^[\s*⁉️\-_~#:•]*(?:السؤال\s*(?:الأول|الثاني|الثالث)?\s*[:：\/]?)?[\s*⁉️\-_~#:•]*/i, "");
-
-  // Replace "وعليكم السلام" at start with "السلام عليكم"
+  q = q.replace(/^[\s*‼️\-_~#:•]*(?:السؤال\s*(?:الأول|الثاني|الثالث)?\s*[:：\/]?)?[\s*‼️\-_~#:•]*/i, "");
   q = q.replace(/^(?:و\s*عليكم\s+السلام(?:\s+ورحمة\s+الله(?:\s+وبركاته)?)?)/i, "السلام عليكم ورحمة الله وبركاته");
-
-  // Replace "وعليكم السلام" after punctuation or newlines
   q = q.replace(/(^|[\n\r.؟!؛])(\s*)(?:و\s*عليكم\s+السلام)/gi, "$1$2السلام عليكم");
 
+  if (isWhatsAppShareCaption(q)) return "";
   return q.trim();
 }
 
-/**
- * High-precision algorithm to clean question text that has the Sheikh's answer blended into it.
- * Retains inquiries, questions, polite openings and closings, and separates out the Sheikh's answers.
- */
 export function cleanQuestionAnswerBleed(text: string | undefined | null): {
   cleanedQuestion: string;
   extractedAnswer: string;
@@ -89,14 +70,12 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
   if (!text || typeof text !== "string") {
     return { cleanedQuestion: "", extractedAnswer: "", hadBleed: false };
   }
-
   const trimmed = text.trim();
-  if (!trimmed) {
+  if (!trimmed || isWhatsAppShareCaption(trimmed)) {
     return { cleanedQuestion: "", extractedAnswer: "", hadBleed: false };
   }
 
-  // 1. Explicit answer header delimiter (الجواب:, جواب الشيخ:, ✍🏻, etc.)
-  const answerHeaderRegex = /\*?✍🏻?\s*(?:جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ|إجابة\s+الشيخ|رد\s+الشيخ|الجواب\s*[:：\/]|ج\s*[:：\/]|\*?الجواب\*?)/i;
+  const answerHeaderRegex = /\*?✍️?\s*(?:جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ|إجابة\s+الشيخ|رد\s+الشيخ|الجواب\s*[:：\/]|ج\s*[:：\/]|\*?الجواب\*?)/i;
   const headerMatch = trimmed.match(answerHeaderRegex);
   if (headerMatch && typeof headerMatch.index === "number" && headerMatch.index > 5) {
     const qPart = trimmed.substring(0, headerMatch.index).trim();
@@ -111,8 +90,8 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     }
   }
 
-  // 2. Answer starting with "وعليكم السلام" in the body of the message
-  const waAlaykumRegex = /(?:[؟?!\n.]\s*|\s{2,})(?:و\s*عليكم\s+السلام(?:\s+ورحمة\s+الله(?:\s+وبركاته)?)?)/i;
+  const waAlaykumRegex = /(?:[؟?!
+.]\s*|\s{2,})(?:و\s*عليكم\s+السلام(?:\s+ورحمة\s+الله(?:\s+وبركاته)?)?)/i;
   const waMatch = trimmed.match(waAlaykumRegex);
   if (waMatch && typeof waMatch.index === "number" && waMatch.index > 8) {
     const qPart = trimmed.substring(0, waMatch.index + 1).trim();
@@ -126,7 +105,6 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     }
   }
 
-  // 3. Interleaved bleed (e.g. AI summarized/quoted the Sheikh inside the question)
   const hasInterleaved = ANSWER_BLEED_PATTERNS.some((pattern) => pattern.test(trimmed));
   if (!hasInterleaved) {
     return {
@@ -136,8 +114,8 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     };
   }
 
-  // Split into sentences / units preserving punctuation
-  const tokens = trimmed.split(/([؟?!\n]|\.(?:\s+|$))/).filter(Boolean);
+  const tokens = trimmed.split(/([؟?!
+]|\.(?:\s+|$))/).filter(Boolean);
   const units: string[] = [];
   for (let i = 0; i < tokens.length; i += 2) {
     const content = tokens[i] || "";
@@ -148,7 +126,6 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
 
   const questionUnits: string[] = [];
   const answerUnits: string[] = [];
-
   const isQuestionSentence = (str: string) => {
     const s = str.trim();
     if (s.endsWith("؟") || s.endsWith("?")) return true;
@@ -157,10 +134,7 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     if (/^(?:وبارك\s+الله\s+فيكم|وجزاكم\s+الله\s+خيرا|ودمتم\s+بخير|أفيدونا\s+مأجورين)[.؟!]?$/i.test(s)) return true;
     return false;
   };
-
-  const isDefiniteAnswer = (str: string) => {
-    return ANSWER_BLEED_PATTERNS.some((p) => p.test(str));
-  };
+  const isDefiniteAnswer = (str: string) => ANSWER_BLEED_PATTERNS.some((p) => p.test(str));
 
   let inAnswerBlock = false;
   for (const unit of units) {
@@ -177,7 +151,6 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     }
   }
 
-  // If no questions were recognized, fallback to original
   if (questionUnits.length === 0) {
     return {
       cleanedQuestion: sanitizeQuestionGreeting(trimmed),
@@ -186,28 +159,23 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     };
   }
 
-  const cleanedQuestion = sanitizeQuestionGreeting(questionUnits.join("\n").trim());
-  const extractedAnswer = answerUnits.join("\n").trim();
-
   return {
-    cleanedQuestion,
-    extractedAnswer,
+    cleanedQuestion: sanitizeQuestionGreeting(questionUnits.join("\n").trim()),
+    extractedAnswer: answerUnits.join("\n").trim(),
     hadBleed: answerUnits.length > 0,
   };
 }
 
-/**
- * Intelligent parser for WhatsApp Fatwa posts and pasted texts:
- * When users paste text containing both question and answer:
- * It extracts the question and answer into separate fields cleanly.
- */
 export function extractWhatsAppQAndA(rawText: string): {
   isWhatsAppPost: boolean;
   question: string;
   answer: string;
 } {
   if (!rawText || typeof rawText !== "string") {
-    return { isWhatsAppPost: false, question: rawText || "", answer: "" };
+    return { isWhatsAppPost: false, question: "", answer: "" };
+  }
+  if (isWhatsAppShareCaption(rawText)) {
+    return { isWhatsAppPost: false, question: "", answer: "" };
   }
 
   const res = cleanQuestionAnswerBleed(rawText);
@@ -226,14 +194,14 @@ export function extractWhatsAppQAndA(rawText: string): {
   };
 }
 
-/**
- * High-level separator that decomposes any text into pure question and pure answer.
- */
 export function separateQuestionAndAnswer(rawText: string): {
   question: string;
   answer: string;
   wasSeparated: boolean;
 } {
+  if (isWhatsAppShareCaption(rawText)) {
+    return { question: "", answer: "", wasSeparated: false };
+  }
   const extracted = extractWhatsAppQAndA(rawText);
   if (extracted.isWhatsAppPost) {
     return {
@@ -242,7 +210,6 @@ export function separateQuestionAndAnswer(rawText: string): {
       wasSeparated: true,
     };
   }
-
   const bleed = cleanQuestionAnswerBleed(rawText);
   if (bleed.hadBleed && bleed.extractedAnswer) {
     return {
@@ -251,11 +218,9 @@ export function separateQuestionAndAnswer(rawText: string): {
       wasSeparated: true,
     };
   }
-
   return {
     question: sanitizeQuestionGreeting(rawText),
     answer: "",
     wasSeparated: false,
   };
 }
-
