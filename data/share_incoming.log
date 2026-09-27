@@ -147,3 +147,13 @@ STORAGE=server-local+client-bridge
 MAGIC_DETECTED=NONE
 REDIRECT=/?shared=sw&id=sh_srv_mujzka2c_uo2dux
 STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mukb9la3_f7fui1]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=412161
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED=NONE
+REDIRECT=/?shared=opus&id=sh_srv_mukb9la3_f7fui1
+STATUS=READY_FOR_CLIENT
