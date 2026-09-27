@@ -1467,7 +1467,7 @@ STATUS=READY_FOR_CLIENT
       const textVal = ${JSON.stringify(sharedText)};
       try {
         if ("caches" in window) {
-          const cache = await caches.open("khilla-shared-media-v15");
+          const cache = await caches.open("khilla-shared-media-v16");
           const meta = {
             id: shareId,
             name: "",
@@ -1640,7 +1640,7 @@ STATUS=READY_FOR_CLIENT
         const blob = new Blob([bytes], { type: mimeType });
 
         if ("caches" in window) {
-          const cache = await caches.open("khilla-shared-media-v15");
+          const cache = await caches.open("khilla-shared-media-v16");
           const meta = {
             id: shareId,
             name: fileName,
@@ -1679,6 +1679,43 @@ STATUS=READY_FOR_CLIENT
 
 app.get("/share-target", (req, res) => {
   res.redirect(303, "/");
+});
+
+app.post("/api/share-ingest", (req, res) => {
+  shareUpload.any()(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false });
+    const allFiles: Express.Multer.File[] = [];
+    if (Array.isArray(req.files)) allFiles.push(...req.files);
+    else if (req.files && typeof req.files === "object") {
+      for (const k of Object.keys(req.files)) {
+        const val = (req.files as any)[k];
+        if (Array.isArray(val)) allFiles.push(...val);
+        else if (val) allFiles.push(val);
+      }
+    }
+    if (req.file) allFiles.push(req.file);
+
+    const file = allFiles.find((f) => f && f.buffer && f.buffer.length > 0);
+    if (!file) return res.status(400).json({ success: false, error: "No file" });
+
+    const fileName = file.originalname || "whatsapp-voice.opus";
+    const mime = file.mimetype || "audio/ogg; codecs=opus";
+    const shareId = "sh_opus_" + Date.now().toString(36);
+
+    const mediaItem: StoredSharedMedia = {
+      id: shareId,
+      name: fileName,
+      mimetype: mime,
+      size: file.buffer.length,
+      buffer: file.buffer,
+      text: "",
+      isVideo: mime.startsWith("video/"),
+      timestamp: Date.now(),
+    };
+    serverSharedMediaStore.set("latest_opus", mediaItem);
+    serverSharedMediaStore.set(shareId, mediaItem);
+    return res.json({ success: true, id: shareId });
+  });
 });
 
 app.get("/api/latest-opus", (req, res) => {

@@ -21,8 +21,7 @@ const ANSWER_BLEED_PATTERNS = [
   /(?:^|[\s\n.؟!؛])(?:قلنا\s+(?:جائز|يجوز|لا يجوز|حلال|حرام|مكروه|لا حرج|صحيح|باطل|نعم|لا|يصح|لا يصح))/i,
   /(?:^|[\s\n.؟!؛])(?:نعم\s+(?:جائز|يجوز|صحيح|يصح|لا حرج)\s*(?:بشرط|إذا|إن|لو)?)/i,
   /(?:^|[\s\n.؟!؛])(?:فالجواب\s+أن|والجواب\s+أن|والجواب\s+على\s+ذلك|الجواب\s*[:：\/]|جواب\s+فضيلة\s+الشيخ|جواب\s+الشيخ\s*[:：]|✍️)/i,
-  /(?:[؟?!
-.]\s*|\s{2,})(?:و\s*عليكم\s+السلام)/i,
+  /(?:[؟?!\n.]\s*|\s{2,})(?:و\s*عليكم\s+السلام)/i,
   /(?:والله\s+أعلم|والله\s+تعالى\s+أعلم)\s*[.!]?$/i,
 ];
 
@@ -90,8 +89,7 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     }
   }
 
-  const waAlaykumRegex = /(?:[؟?!
-.]\s*|\s{2,})(?:و\s*عليكم\s+السلام(?:\s+ورحمة\s+الله(?:\s+وبركاته)?)?)/i;
+  const waAlaykumRegex = /(?:[؟?!\n.]\s*|\s{2,})(?:و\s*عليكم\s+السلام(?:\s+ورحمة\s+الله(?:\s+وبركاته)?)?)/i;
   const waMatch = trimmed.match(waAlaykumRegex);
   if (waMatch && typeof waMatch.index === "number" && waMatch.index > 8) {
     const qPart = trimmed.substring(0, waMatch.index + 1).trim();
@@ -114,8 +112,7 @@ export function cleanQuestionAnswerBleed(text: string | undefined | null): {
     };
   }
 
-  const tokens = trimmed.split(/([؟?!
-]|\.(?:\s+|$))/).filter(Boolean);
+  const tokens = trimmed.split(/([؟?!\n]|\.(?:\s+|$))/).filter(Boolean);
   const units: string[] = [];
   for (let i = 0; i < tokens.length; i += 2) {
     const content = tokens[i] || "";
