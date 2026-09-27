@@ -1,10 +1,14 @@
 /**
- * shareTarget.ts
- * مشاركة واتساب = تسجيل صوتي فقط. لا يُستخدم اسم المرسل ولا كابشن واتساب كسؤال.
- * khilla-pwa-v17
+ * shareTarget.ts — khilla-pwa-v18
+ * جلب ملف التسجيل المشارك من واتساب فقط. بلا نص.
  */
 
-const LEGACY_CACHE_NAMES = ["khilla-shared-media-v15", "khilla-shared-media-v16", "khilla-shared-media-v17"];
+const CACHE_NAMES = [
+  "khilla-shared-media-v18",
+  "khilla-shared-media-v17",
+  "khilla-shared-media-v16",
+  "khilla-shared-media-v15",
+];
 
 export interface SharedOpusResult {
   file: File;
@@ -20,24 +24,10 @@ export interface ShareInfo {
   type: "opus" | "text" | "empty" | null;
 }
 
-export function isWhatsAppVoiceCaption(text: string | null | undefined): boolean {
-  if (!text || typeof text !== "string") return false;
-  const t = text.trim();
-  if (!t) return false;
-  if (t.length > 220) return false;
-  if (/\bمن\s+\S+/.test(t) && t.length < 120 && !t.includes("؟") && !t.includes("?")) {
-    if (/^(?:مقطع|رسالة|تسجيل|فيديو)/.test(t)) return true;
-  }
-  if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من\b/i.test(t)) return true;
-  if (/^Voice\s+(?:message|note)\s+from\b/i.test(t)) return true;
-  if (/^Audio(?:\s+message)?\s+from\b/i.test(t)) return true;
-  if (/^Video\s+from\b/i.test(t)) return true;
-  if (/^PTT[-_\s]/i.test(t) || /^AUD[-_\s]/i.test(t)) return true;
-  if (/\.(?:opus|ogg|oga|amr|m4a|mp3|wav)$/i.test(t) && t.length < 80) return true;
-  return false;
+export function isWhatsAppVoiceCaption(_text: string | null | undefined): boolean {
+  return true;
 }
 
-/** لا نستخدم نص واتساب كسؤال أبداً عند مشاركة تسجيل */
 export function usableSharedQuestionText(_text: string | null | undefined): string {
   return "";
 }
@@ -51,60 +41,87 @@ export function wasOpenedFromShare(): boolean {
 export function getShareTargetInfo(): ShareInfo {
   if (typeof window === "undefined") return { isShare: false, type: null };
   const p = new URLSearchParams(window.location.search);
-  const shared = p.get("shared");
-  if (!shared && !p.get("id")) return { isShare: false, type: null };
-  // أي مشاركة من واتساب تُعامل كمحاولة استلام تسجيل، وليس نص سؤال
+  if (!p.get("shared") && !p.get("id")) return { isShare: false, type: null };
   return { isShare: true, type: "opus" };
+}
+
+function toResult(blob: Blob, name: string, mime: string, isVideo: boolean): SharedOpusResult {
+  const file = new File([blob], name || "whatsapp-voice.opus", {
+    type: mime || blob.type || "audio/ogg; codecs=opus",
+  });
+  return { file, name: file.name, size: file.size, mimeType: file.type, isVideo, text: "" };
 }
 
 async function readFromCache(cacheName: string): Promise<SharedOpusResult | null> {
   const cache = await caches.open(cacheName);
-  const [mediaRes, metaRes] = await Promise.all([
-    cache.match("/__shared_opus_media__"),
-    cache.match("/__shared_opus_meta__"),
-  ]);
+  const mediaRes = await cache.match("/__shared_opus_media__");
   if (!mediaRes) return null;
   const blob = await mediaRes.blob();
   if (!blob || blob.size <= 0) return null;
-  let meta = { name: "whatsapp-voice.opus", mimeType: blob.type || "audio/ogg; codecs=opus", isVideo: false };
+  let name = "whatsapp-voice.opus";
+  let mime = blob.type || "audio/ogg; codecs=opus";
+  let isVideo = mime.startsWith("video/");
+  const metaRes = await cache.match("/__shared_opus_meta__");
   if (metaRes) {
     try {
       const parsed = await metaRes.json();
-      if (parsed.name) meta.name = parsed.name;
-      if (parsed.mimeType) meta.mimeType = parsed.mimeType;
-      if (parsed.isVideo !== undefined) meta.isVideo = Boolean(parsed.isVideo);
+      if (parsed.name) name = parsed.name;
+      if (parsed.mimeType) mime = parsed.mimeType;
+      if (parsed.isVideo !== undefined) isVideo = Boolean(parsed.isVideo);
     } catch (_) {}
   }
-  const file = new File([blob], meta.name || "whatsapp-voice.opus", {
-    type: meta.mimeType || blob.type || "audio/ogg; codecs=opus",
+  return toResult(blob, name, mime, isVideo);
+}
+
+async function readFromIndexedDb(): Promise<SharedOpusResult | null> {
+  if (typeof indexedDB === "undefined") return null;
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open("khilla-share-v18", 1);
+      req.onerror = () => resolve(null);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains("media")) req.result.createObjectStore("media");
+      };
+      req.onsuccess = () => {
+        try {
+          const tx = req.result.transaction("media", "readonly");
+          const get = tx.objectStore("media").get("latest");
+          get.onerror = () => resolve(null);
+          get.onsuccess = () => {
+            const row = get.result;
+            if (!row || !row.blob) return resolve(null);
+            const blob = row.blob as Blob;
+            if (!blob.size) return resolve(null);
+            const meta = row.meta || {};
+            resolve(toResult(blob, meta.name || "whatsapp-voice.opus", meta.mimeType || blob.type, Boolean(meta.isVideo)));
+          };
+        } catch {
+          resolve(null);
+        }
+      };
+    } catch {
+      resolve(null);
+    }
   });
-  cache.delete("/__shared_opus_media__").catch(() => {});
-  cache.delete("/__shared_opus_meta__").catch(() => {});
-  return {
-    file,
-    name: file.name,
-    size: file.size,
-    mimeType: file.type,
-    isVideo: meta.isVideo,
-    text: "",
-  };
 }
 
 export async function getSharedOpusAudio(): Promise<SharedOpusResult | null> {
   if (typeof window !== "undefined" && "caches" in window) {
-    for (const name of LEGACY_CACHE_NAMES) {
+    for (const name of CACHE_NAMES) {
       try {
         const fromCache = await readFromCache(name);
         if (fromCache) return fromCache;
-      } catch (cacheErr) {
-        console.warn("Cache match error:", cacheErr);
-      }
+      } catch (_) {}
     }
   }
+  try {
+    const fromIdb = await readFromIndexedDb();
+    if (fromIdb) return fromIdb;
+  } catch (_) {}
   const shareId =
     typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null;
   const endpoints = ["/api/latest-opus"];
-  if (shareId) endpoints.unshift(`/api/shared-file/${encodeURIComponent(shareId)}/raw`);
+  if (shareId) endpoints.unshift("/api/shared-file/" + encodeURIComponent(shareId) + "/raw");
   for (const url of endpoints) {
     try {
       const res = await fetch(url, { cache: "no-store" });
@@ -112,15 +129,13 @@ export async function getSharedOpusAudio(): Promise<SharedOpusResult | null> {
       const blob = await res.blob();
       if (!blob || blob.size <= 0) continue;
       const mime = blob.type || "audio/ogg; codecs=opus";
-      const file = new File([blob], "whatsapp-voice.opus", { type: mime });
-      return { file, name: file.name, size: file.size, mimeType: file.type, isVideo: mime.startsWith("video/"), text: "" };
+      return toResult(blob, "whatsapp-voice.opus", mime, mime.startsWith("video/"));
     } catch (_) {}
   }
   return null;
 }
 
 export async function getSharedText(): Promise<string | null> {
-  // مشاركة التسجيل لا تُدخل أي نص في خانة السؤال
   return null;
 }
 
@@ -128,8 +143,8 @@ export async function waitForSharedOpus(options?: {
   attempts?: number;
   delayMs?: number;
 }): Promise<SharedOpusResult | null> {
-  const attempts = options?.attempts ?? 24;
-  const delayMs = options?.delayMs ?? 250;
+  const attempts = options?.attempts ?? 30;
+  const delayMs = options?.delayMs ?? 200;
   for (let i = 0; i < attempts; i++) {
     const shared = await getSharedOpusAudio();
     if (shared && shared.file && shared.file.size > 0) return shared;
@@ -141,8 +156,8 @@ export async function waitForSharedOpus(options?: {
 export function listenForShareReady(callback: (meta?: unknown) => void): () => void {
   if (typeof navigator === "undefined" || !navigator.serviceWorker) return () => {};
   const handler = (event: MessageEvent) => {
-    const type = event.data?.type;
-    if (type === "OPUS_SHARE_READY" || type === "SHARE_READY") callback(event.data?.meta);
+    const type = event.data && event.data.type;
+    if (type === "OPUS_SHARE_READY" || type === "SHARE_READY") callback(event.data && event.data.meta);
   };
   navigator.serviceWorker.addEventListener("message", handler);
   return () => navigator.serviceWorker.removeEventListener("message", handler);
