@@ -1,19 +1,77 @@
 /**
  * Utility functions for sanitizing Fatwa questions.
- * WhatsApp voice-share captions like "مقطع صوتي من ..." must never enter the question box.
+ * WhatsApp voice-share boilerplate ("مقطع صوتي من …") is not the question.
+ * The person's name after «من» is kept for the question field.
  */
+
+function cleanSenderName(raw: string): string {
+  let name = raw.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+  name = name.replace(/^[:：\-–—\s]+/, "").replace(/[\s،,!！?؟]+$/, "").trim();
+  if (!name || name.length > 80) return "";
+  if (/\.(?:opus|ogg|oga|amr|m4a|mp3|wav|mp4|webm)$/i.test(name)) return "";
+  if (/^(?:whatsapp|واتساب|ptt|aud)[-_\s]/i.test(name)) return "";
+  return name;
+}
+
+/** Name of the person WhatsApp attributes on a shared voice note: «مقطع صوتي من فلان». */
+export function extractWhatsAppSenderName(text: string | undefined | null): string {
+  if (!text || typeof text !== "string") return "";
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const patterns = [
+    /^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من\s*[:：]?\s*(.+)$/i,
+    /^(?:Voice\s+(?:message|note)|Audio(?:\s+message)?|Video)\s+from\s*[:：]?\s*(.+)$/i,
+  ];
+  for (const line of lines) {
+    for (const pattern of patterns) {
+      const match = line.match(pattern);
+      if (!match?.[1]) continue;
+      const name = cleanSenderName(match[1]);
+      if (name) return name;
+    }
+  }
+  return "";
+}
 
 export function isWhatsAppShareCaption(text: string | undefined | null): boolean {
   if (!text || typeof text !== "string") return false;
   const t = text.trim();
   if (!t || t.length > 220) return false;
-  if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من\b/i.test(t)) return true;
-  if (/^Voice\s+(?:message|note)\s+from\b/i.test(t)) return true;
-  if (/^Audio(?:\s+message)?\s+from\b/i.test(t)) return true;
-  if (/^Video\s+from\b/i.test(t)) return true;
+  if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من(?:\s|$|[:：])/i.test(t)) return true;
+  if (/^Voice\s+(?:message|note)\s+from(?:\s|$|[:：])/i.test(t)) return true;
+  if (/^Audio(?:\s+message)?\s+from(?:\s|$|[:：])/i.test(t)) return true;
+  if (/^Video\s+from(?:\s|$|[:：])/i.test(t)) return true;
   if (/^PTT[-_\s]/i.test(t) || /^AUD[-_\s]/i.test(t)) return true;
   if (/\.(?:opus|ogg|oga|amr|m4a|mp3|wav)$/i.test(t) && t.length < 80) return true;
   return false;
+}
+
+/**
+ * Opus/voice shares: boilerplate stays out, the sharer's name becomes the question
+ * when no real question text was sent with the file.
+ */
+export function questionFromSharedCaption(raw: string | undefined | null): {
+  senderName: string;
+  question: string;
+  voiceCaptionOnly: boolean;
+} {
+  const text = (raw || "").replace(/\u0000/g, "").trim();
+  if (!text) return { senderName: "", question: "", voiceCaptionOnly: false };
+
+  const senderName = extractWhatsAppSenderName(text);
+  const remainder = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !isWhatsAppShareCaption(line))
+    .join("\n")
+    .trim();
+
+  if (!remainder) {
+    return { senderName, question: senderName, voiceCaptionOnly: Boolean(senderName) };
+  }
+  return { senderName, question: remainder, voiceCaptionOnly: false };
 }
 
 const ANSWER_BLEED_PATTERNS = [

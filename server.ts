@@ -1604,7 +1604,9 @@ app.post("/share-target", (req, res) => {
       const detectedMagic = file?.buffer ? detectMediaFromBuffer(file.buffer) : null;
       const shareId = "sh_srv_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 8);
 
-      const sharedText = (req.body?.text || req.body?.title || "").trim();
+      const titleText = String(req.body?.title || "").trim();
+      const bodyText = String(req.body?.text || "").trim();
+      const sharedText = [titleText, bodyText].filter((part, index, all) => part && all.indexOf(part) === index).join("\n");
 
       // إذا لم يتوفر ملف صوتي، لكن وصل نص (سؤال أو منشور من واتساب)
       if (!file || !file.buffer || file.buffer.length === 0) {

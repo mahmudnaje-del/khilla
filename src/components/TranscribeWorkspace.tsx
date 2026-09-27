@@ -40,7 +40,7 @@ import {
 import { fileToBase64, formatDuration, formatFileSize, createSampleAudioTone } from "../utils/audioHelper";
 import { Fatwa, TranscribeResponse } from "../types";
 import { DEFAULT_TEMPLATE_SETTINGS } from "../utils/storage";
-import { wasOpenedFromShare, getShareTargetInfo, getSharedText, waitForSharedOpus, listenForOpenedFiles, markShareMissed, clearPendingShare, chromeDropsShareFiles, usableSharedQuestionText } from "../utils/shareTarget";
+import { wasOpenedFromShare, getShareTargetInfo, getSharedText, waitForSharedOpus, listenForOpenedFiles, markShareMissed, clearPendingShare, chromeDropsShareFiles } from "../utils/shareTarget";
 import ThinkingLogo from "./ThinkingLogo";
 import { WordImportModal } from "./WordImportModal";
 import {
@@ -50,6 +50,7 @@ import {
   hasAnswerInQuestion,
   cleanQuestionAnswerBleed,
   separateQuestionAndAnswer,
+  questionFromSharedCaption,
 } from "../utils/greetingSanitizer";
 import { ArabicFatwaDetailsModal } from "./ArabicFatwaDetailsModal";
 import { cleanTashkeelText, formatVocalizedFatwaForCopy } from "../utils/tashkeelHelper";
@@ -226,7 +227,19 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
           const text = await getSharedText();
           if (text && text.trim().length > 0) {
             const trimmed = text.trim();
-            const extracted = extractWhatsAppQAndA(trimmed);
+            const fromCaption = questionFromSharedCaption(trimmed);
+            if (fromCaption.voiceCaptionOnly && fromCaption.senderName) {
+              setQuestion(fromCaption.senderName);
+              showToast(
+                `تم وضع اسم «${fromCaption.senderName}» في خانة السؤال. اختر تسجيل الجواب إن لم يصل ملف الـ opus.`,
+                "success"
+              );
+              setShareBlocked(false);
+              setErrorMessage(null);
+              finishLaunch(true);
+              return;
+            }
+            const extracted = extractWhatsAppQAndA(fromCaption.question || trimmed);
             if (extracted.isWhatsAppPost) {
               setQuestion(extracted.question);
               if (extracted.answer && !manualRawText.trim()) {
@@ -235,7 +248,7 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
               }
               showToast("تم استلام منشور واتساب وفصل السؤال عن الجواب بنجاح! 📝", "success");
             } else {
-              setQuestion(sanitizeQuestionGreeting(trimmed));
+              setQuestion(sanitizeQuestionGreeting(fromCaption.question || trimmed));
               showToast("تم استلام نص السؤال من واتساب بنجاح 📝. يرجى اختيار تسجيل جواب الشيخ أدناه.", "success");
             }
             setShareBlocked(false);
@@ -273,16 +286,23 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
 
         if (shared && shared.file && shared.file.size > 0) {
           await handleFileSelect(shared.file);
-          const caption = usableSharedQuestionText(shared.text);
-          if (caption && !question.trim()) {
-            const ext = extractWhatsAppQAndA(caption);
+          const fromCaption = questionFromSharedCaption(shared.text);
+          if (fromCaption.voiceCaptionOnly && fromCaption.senderName) {
+            setQuestion(fromCaption.senderName);
+          } else if (fromCaption.question && !question.trim()) {
+            const ext = extractWhatsAppQAndA(fromCaption.question);
             if (ext.question) setQuestion(ext.question);
-            else setQuestion(sanitizeQuestionGreeting(caption));
+            else setQuestion(sanitizeQuestionGreeting(fromCaption.question));
           }
           setErrorMessage(null);
           setShareBlocked(false);
           finishLaunch(true);
-          showToast(`تم استلام تسجيل واتساب (${shared.name}) بنجاح 🎙️`, "success");
+          showToast(
+            fromCaption.senderName
+              ? `تم استلام تسجيل واتساب، واسم المُشارِك «${fromCaption.senderName}» في خانة السؤال`
+              : `تم استلام تسجيل واتساب (${shared.name}) بنجاح 🎙️`,
+            "success"
+          );
           return;
         }
 
