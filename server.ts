@@ -17,7 +17,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Middleware for large payload (audio files)
 app.use(express.json({ limit: "50mb" }));
@@ -154,6 +154,46 @@ const FATWA_SYSTEM_INSTRUCTION = `أنت مفرغ صوتي ومحرر نصوص �
 7. التعامل مع الكلمات غير الواضحة في الصوت:
    - ضع بدقة [غير واضح] أو [اسم غير واضح] في مكانها المناسب وأدرجها في unclear_segments، ولا تخمن كلاماً من عندك.`;
 
+function requestOrigin(req: express.Request): string {
+  const rawHost = String(req.headers["x-forwarded-host"] || req.headers.host || "localhost")
+    .split(",")[0]
+    .trim();
+  const host = rawHost.replace(/[^a-zA-Z0-9.:[\]-]/g, "");
+  const forwarded = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  const proto =
+    forwarded === "http" || forwarded === "https"
+      ? forwarded
+      : host.startsWith("localhost") || host.startsWith("127.")
+        ? "http"
+        : "https";
+  return `${proto}://${host}`;
+}
+
+const WHATSAPP_SHARE_ACCEPT = [
+  "audio/*",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/wav",
+  "audio/aac",
+  "audio/webm",
+  "audio/3gpp",
+  "application/ogg",
+  "application/octet-stream",
+  "video/*",
+  ".opus",
+  ".ogg",
+  ".mp3",
+  ".m4a",
+  ".wav",
+  ".amr",
+  ".3gp",
+  ".webm",
+];
+
 // Explicit Manifest routes with standard MIME type
 app.get(["/manifest.webmanifest", "/manifest.json"], (req, res) => {
   res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
@@ -161,6 +201,18 @@ app.get(["/manifest.webmanifest", "/manifest.json"], (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const manifestPath = path.join(process.cwd(), "public", "manifest.webmanifest");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const origin = requestOrigin(req);
+  manifest.share_target = {
+    action: `${origin}/share-target`,
+    method: "POST",
+    enctype: "multipart/form-data",
+    params: {
+      title: "title",
+      text: "text",
+      url: "url",
+      files: [{ name: "media", accept: WHATSAPP_SHARE_ACCEPT }],
+    },
+  };
   res.json(manifest);
 });
 
