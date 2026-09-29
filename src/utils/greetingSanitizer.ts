@@ -48,9 +48,44 @@ export function isWhatsAppShareCaption(text: string | undefined | null): boolean
   return false;
 }
 
+export function isSenderNameOnly(text: string | undefined | null): boolean {
+  if (!text || typeof text !== "string") return true;
+  const t = text.trim();
+  if (!t) return true;
+  if (isWhatsAppShareCaption(t)) return true;
+  // أرقام هواتف أو رموز
+  if (/^[\d+\-\s()._#*]+$/.test(t)) return true;
+  // أسماء باللغة الإنجليزية أو العربية لا تحوي صيغ استفهام
+  if (/^[a-zA-Z\s._\-]+$/.test(t) && t.length < 50) return true;
+  // نصوص قصيرة لا تحوي علامات استفهام أو كلمات استفسار شرعي
+  if (
+    t.length <= 50 &&
+    !t.includes("؟") &&
+    !t.includes("?") &&
+    !/حكم|هل|ماذا|كيف|أين|متى|يجوز|صيام|صلاة|زكاة|طلاق|سؤال|فتوى|أفيدونا/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isRealQuestionText(text: string | undefined | null): boolean {
+  if (!text || typeof text !== "string") return false;
+  const t = text.trim();
+  if (!t || t.length < 6) return false;
+  if (isWhatsAppShareCaption(t)) return false;
+  if (isSenderNameOnly(t)) return false;
+  if (/^[\d+\-\s()._#*]+$/.test(t)) return false;
+  if (/^[a-zA-Z\s._\-]+$/.test(t)) return false;
+  if (t.includes("؟") || t.includes("?")) return true;
+  if (/^(?:السلام\s+عليكم|سؤال|السؤال|ما\s+حكم|هل|كيف|أين|متى|ماذا|يجوز|أفيدونا|ما\s+قولكم)/i.test(t)) return true;
+  if (t.length >= 25 && /[\s]/.test(t) && !isSenderNameOnly(t)) return true;
+  return false;
+}
+
 /**
- * Opus/voice shares: boilerplate stays out, the sharer's name becomes the question
- * when no real question text was sent with the file.
+ * Opus/voice shares: boilerplate stays out.
+ * The contact/sharer name is kept as senderName metadata ONLY, and NEVER placed into the question field.
  */
 export function questionFromSharedCaption(raw: string | undefined | null): {
   senderName: string;
@@ -68,8 +103,11 @@ export function questionFromSharedCaption(raw: string | undefined | null): {
     .join("\n")
     .trim();
 
-  if (!remainder) {
-    return { senderName, question: senderName, voiceCaptionOnly: Boolean(senderName) };
+  // If there's no question text, or remainder is just a sender name/caption:
+  const isSenderOnly = !remainder || remainder === senderName || isSenderNameOnly(remainder) || !isRealQuestionText(remainder);
+  if (isSenderOnly) {
+    const finalSender = senderName || cleanSenderName(remainder) || remainder;
+    return { senderName: finalSender, question: "", voiceCaptionOnly: true };
   }
   return { senderName, question: remainder, voiceCaptionOnly: false };
 }
@@ -229,7 +267,7 @@ export function extractWhatsAppQAndA(rawText: string): {
   if (!rawText || typeof rawText !== "string") {
     return { isWhatsAppPost: false, question: "", answer: "" };
   }
-  if (isWhatsAppShareCaption(rawText)) {
+  if (!isRealQuestionText(rawText)) {
     return { isWhatsAppPost: false, question: "", answer: "" };
   }
 
@@ -254,7 +292,7 @@ export function separateQuestionAndAnswer(rawText: string): {
   answer: string;
   wasSeparated: boolean;
 } {
-  if (isWhatsAppShareCaption(rawText)) {
+  if (!isRealQuestionText(rawText)) {
     return { question: "", answer: "", wasSeparated: false };
   }
   const extracted = extractWhatsAppQAndA(rawText);

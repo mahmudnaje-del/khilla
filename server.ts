@@ -161,21 +161,6 @@ app.get(["/manifest.webmanifest", "/manifest.json"], (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   const manifestPath = path.join(process.cwd(), "public", "manifest.webmanifest");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-  const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
-  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").split(",")[0].trim();
-  if (host) {
-    const origin = `${proto}://${host}`;
-    if (manifest.share_target && typeof manifest.share_target.action === "string" && manifest.share_target.action.startsWith("/")) {
-      manifest.share_target.action = origin + manifest.share_target.action;
-    }
-    if (Array.isArray(manifest.file_handlers)) {
-      for (const handler of manifest.file_handlers) {
-        if (handler && typeof handler.action === "string" && handler.action.startsWith("/")) {
-          handler.action = origin + handler.action;
-        }
-      }
-    }
-  }
   res.json(manifest);
 });
 
@@ -1392,120 +1377,7 @@ function normalizeGeminiMime(rawMime: string | undefined, isVideo: boolean): str
 const SHARE_CACHE_NAME = "khilla-shared-media-v19";
 const SHARE_DB_NAME = "khilla-share-v19";
 const SHARE_INLINE_MAX_BYTES = 8 * 1024 * 1024;
-
-function renderShareHandoffPage(opts: {
-  shareId: string;
-  kind: "opus" | "text";
-  fileName?: string;
-  mimeType?: string;
-  isVideo?: boolean;
-  text?: string;
-  base64?: string;
-}): string {
-  const next =
-    opts.kind === "text"
-      ? `/?shared=text&id=${encodeURIComponent(opts.shareId)}`
-      : `/?shared=opus&id=${encodeURIComponent(opts.shareId)}`;
-  const title = opts.kind === "text" ? "جارٍ استلام السؤال..." : "جارٍ استلام التسجيل...";
-  const label = opts.kind === "text" ? "جارٍ إدراج نص السؤال..." : "جارٍ تجهيز التسجيل الصوتي...";
-  const payload = {
-    shareId: opts.shareId,
-    kind: opts.kind,
-    fileName: opts.fileName || "",
-    mimeType: opts.mimeType || "",
-    isVideo: Boolean(opts.isVideo),
-    text: opts.text || "",
-    base64: opts.base64 || "",
-    cacheName: SHARE_CACHE_NAME,
-    dbName: SHARE_DB_NAME,
-    next,
-  };
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <title>${title}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="8;url=${next}">
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #faf7f2; color: #1b2a41; text-align: center; }
-    .box { padding: 24px; border-radius: 20px; background: white; box-shadow: 0 10px 30px rgba(0,0,0,0.06); max-width: 320px; border: 1px solid #e7e0d6; }
-    .loader { width: 40px; height: 40px; border: 3px solid #e2d9cc; border-top-color: #0c392c; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div class="loader"></div>
-    <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">${label}</div>
-    <div style="font-size: 12px; color: #666;">يتم نقله للمشغل الآن</div>
-  </div>
-  <script>
-    (async function () {
-      var p = ${JSON.stringify(payload)};
-      try {
-        sessionStorage.setItem("khilla-pending-share", JSON.stringify({
-          shared: p.kind === "text" ? "text" : "opus",
-          id: p.shareId,
-          at: Date.now()
-        }));
-      } catch (e) {}
-      var blob = null;
-      if (p.base64) {
-        try {
-          var bin = atob(p.base64);
-          var bytes = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          blob = new Blob([bytes], { type: p.mimeType || "audio/ogg" });
-        } catch (e) {}
-      }
-      var meta = {
-        id: p.shareId,
-        name: p.fileName,
-        size: blob ? blob.size : 0,
-        mimeType: p.mimeType || (p.kind === "text" ? "text/plain" : "audio/ogg"),
-        isVideo: p.isVideo,
-        text: p.text || "",
-        receivedAt: Date.now(),
-        source: "SERVER_BRIDGE"
-      };
-      try {
-        if ("caches" in window) {
-          var cache = await caches.open(p.cacheName);
-          var jobs = [
-            cache.put("/__shared_opus_meta__", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }))
-          ];
-          if (blob) {
-            jobs.push(cache.put("/__shared_opus_media__", new Response(blob, {
-              headers: { "Content-Type": meta.mimeType, "X-Share-Id": p.shareId }
-            })));
-          }
-          await Promise.all(jobs);
-        }
-      } catch (e) {}
-      try {
-        await new Promise(function (resolve) {
-          var req = indexedDB.open(p.dbName, 1);
-          req.onerror = function () { resolve(false); };
-          req.onupgradeneeded = function () {
-            if (!req.result.objectStoreNames.contains("media")) req.result.createObjectStore("media");
-          };
-          req.onsuccess = function () {
-            try {
-              var tx = req.result.transaction("media", "readwrite");
-              tx.oncomplete = function () { resolve(true); };
-              tx.onerror = function () { resolve(false); };
-              tx.objectStore("media").put({ blob: blob, meta: meta }, "latest");
-            } catch (err) { resolve(false); }
-          };
-        });
-      } catch (e) {}
-      location.replace(p.next);
-    })();
-  </script>
-</body>
-</html>`;
-}
+const MAX_SHARED_AGE_MS = 30 * 1000; // 30 ثانية فقط لضمان عدم تحميل أي تسجيل قديم أو غير مقصود
 
 function loadSharedMediaFromDisk(id: string): StoredSharedMedia | null {
   if (!id || !/^[a-zA-Z0-9_\-]+$/.test(id) || id.length > 64) return null;
@@ -1514,6 +1386,11 @@ function loadSharedMediaFromDisk(id: string): StoredSharedMedia | null {
     const binPath = path.join(SHARED_MEDIA_DIR, `${id}.bin`);
     if (!fs.existsSync(metaPath) || !fs.existsSync(binPath)) return null;
     const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    const timestamp = meta.timestamp || 0;
+    if (Date.now() - timestamp > MAX_SHARED_AGE_MS) {
+      // ملف قديم منتهي الصلاحية
+      return null;
+    }
     const buf = fs.readFileSync(binPath);
     const item: StoredSharedMedia = {
       id: meta.id || id,
@@ -1523,7 +1400,7 @@ function loadSharedMediaFromDisk(id: string): StoredSharedMedia | null {
       buffer: buf,
       text: meta.text || "",
       isVideo: Boolean(meta.isVideo),
-      timestamp: meta.timestamp || Date.now(),
+      timestamp,
     };
     serverSharedMediaStore.set(id, item);
     return item;
@@ -1534,12 +1411,18 @@ function loadSharedMediaFromDisk(id: string): StoredSharedMedia | null {
 
 function loadLatestSharedMedia(): StoredSharedMedia | null {
   const mem = serverSharedMediaStore.get("latest_opus");
-  if (mem && mem.buffer && mem.buffer.length > 0) return mem;
+  if (mem && mem.buffer && mem.buffer.length > 0) {
+    if (Date.now() - (mem.timestamp || 0) <= MAX_SHARED_AGE_MS) {
+      return mem;
+    }
+    serverSharedMediaStore.delete("latest_opus");
+  }
+
   try {
     const pointerPath = path.join(SHARED_MEDIA_DIR, "latest.json");
     if (fs.existsSync(pointerPath)) {
       const pointer = JSON.parse(fs.readFileSync(pointerPath, "utf-8"));
-      if (pointer && typeof pointer.id === "string") {
+      if (pointer && typeof pointer.id === "string" && (Date.now() - (pointer.timestamp || 0) <= MAX_SHARED_AGE_MS)) {
         const fromPointer = loadSharedMediaFromDisk(pointer.id);
         if (fromPointer) {
           serverSharedMediaStore.set("latest_opus", fromPointer);
@@ -1550,6 +1433,7 @@ function loadLatestSharedMedia(): StoredSharedMedia | null {
   } catch {
     /* ignore */
   }
+
   return null;
 }
 
@@ -1608,11 +1492,61 @@ app.post("/share-target", (req, res) => {
       const bodyText = String(req.body?.text || "").trim();
       const sharedText = [titleText, bodyText].filter((part, index, all) => part && all.indexOf(part) === index).join("\n");
 
-      // إذا لم يتوفر ملف صوتي، لكن وصل نص (سؤال أو منشور من واتساب)
+      // إذا لم يتوفر ملف صوتي، لكن وصل نص (سؤال أو منشور من واتساب أو اسم مرسل لتسجيل صوتي)
       if (!file || !file.buffer || file.buffer.length === 0) {
+        const isVoiceCaptionOrSenderOnly = (t: string): boolean => {
+          if (!t) return true;
+          const s = t.trim();
+          if (s.length === 0) return true;
+          if (/^(?:مقطع\s+(?:صوتي|فيديو)|رسالة\s+صوتية|تسجيل\s+صوتي)\s+من/i.test(s)) return true;
+          if (/^(?:Voice\s+(?:message|note)|Audio|Video)\s+from/i.test(s)) return true;
+          if (/^PTT[-_\s]/i.test(s) || /^AUD[-_\s]/i.test(s)) return true;
+          if (s.length <= 40 && !s.includes("؟") && !s.includes("?") && !/حكم|هل|ماذا|كيف|يجوز|صيام|صلاة|زكاة|طلاق|فتوى|سؤال/i.test(s)) {
+            return true;
+          }
+          return false;
+        };
+
+        if (sharedText.length > 0 && isVoiceCaptionOrSenderOnly(sharedText)) {
+          // وصل نص ترويسة/مرسل فقط دون ملف صوتي
+          try {
+            const logData = `[SHARE ${shareId}]
+POST_RECEIVED
+WHATSAPP_VOICE_NOTE_SENDER_ONLY=${JSON.stringify(sharedText)}
+NO_ATTACHED_FILE
+REDIRECT=/?shared=nofile
+`;
+            fs.appendFileSync(path.join(DATA_DIR, "share_incoming.log"), logData);
+          } catch (_) {}
+
+          return res.redirect(303, `/?shared=nofile&t=${Date.now()}`);
+        }
+
         if (sharedText.length > 0) {
           const textShareId = "sh_txt_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 8);
+          const textItem: StoredSharedMedia = {
+            id: textShareId,
+            name: "shared-text.txt",
+            mimetype: "text/plain; charset=utf-8",
+            size: Buffer.byteLength(sharedText, "utf-8"),
+            buffer: Buffer.from(sharedText, "utf-8"),
+            text: sharedText,
+            isVideo: false,
+            timestamp: Date.now(),
+          };
+          serverSharedMediaStore.set(textShareId, textItem);
+          serverSharedMediaStore.set("latest_text", textItem);
           try {
+            fs.writeFileSync(
+              path.join(SHARED_MEDIA_DIR, `${textShareId}.json`),
+              JSON.stringify(textItem, null, 2),
+              "utf-8"
+            );
+            fs.writeFileSync(
+              path.join(SHARED_MEDIA_DIR, "latest_text.json"),
+              JSON.stringify({ id: textShareId, timestamp: textItem.timestamp }),
+              "utf-8"
+            );
             const logData = `[SHARE ${textShareId}]
 POST_RECEIVED
 TEXT_ONLY_FOUND: length=${sharedText.length}
@@ -1623,14 +1557,7 @@ STATUS=READY_FOR_CLIENT
             fs.appendFileSync(path.join(DATA_DIR, "share_incoming.log"), logData);
           } catch (_) {}
 
-          res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          return res.send(renderShareHandoffPage({
-            shareId: textShareId,
-            kind: "text",
-            text: sharedText,
-            mimeType: "text/plain",
-          }));
+          return res.redirect(303, `/?shared=text&id=${textShareId}&t=${Date.now()}`);
         }
 
         console.warn(`[SHARE ${shareId}] No audio or video file or text received in payload. Form fields:`, Object.keys(req.body || {}));
@@ -1639,11 +1566,11 @@ STATUS=READY_FOR_CLIENT
 POST_RECEIVED
 NO_FILE_FOUND
 FORM_FIELDS=${JSON.stringify(Object.keys(req.body || {}))}
-REDIRECT=/?shared=empty&reason=no_file
+REDIRECT=/?shared=empty
 `;
           fs.appendFileSync(path.join(DATA_DIR, "share_incoming.log"), logData);
         } catch (_) {}
-        return res.redirect(303, "/?shared=empty&reason=no_file");
+        return res.redirect(303, `/?shared=empty&t=${Date.now()}`);
       }
 
       // تحديد هل هو فيديو أم صوت
@@ -1744,19 +1671,9 @@ STATUS=READY_FOR_CLIENT
 
       // جسر التسليم: الملف يُكتب في IndexedDB وCache داخل جهاز المستخدم
       // ثم تُفتح الصفحة ومعها معرّف المشاركة حتى لو تغيّرت حاوية Cloud Run.
-      const inlineBase64 = file.buffer.length <= SHARE_INLINE_MAX_BYTES ? file.buffer.toString("base64") : "";
-
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      return res.send(renderShareHandoffPage({
-        shareId,
-        kind: "opus",
-        fileName: finalName,
-        mimeType: detectedMime,
-        isVideo: isVideoMedia,
-        text: sharedText,
-        base64: inlineBase64,
-      }));
+      fs.writeFileSync(path.join(SHARED_MEDIA_DIR, "latest_opus.bin"), file.buffer);
+      const senderParam = sharedText ? `&sender=${encodeURIComponent(sharedText)}` : "";
+      return res.redirect(303, `/?shared=opus&id=${shareId}${senderParam}&t=${Date.now()}`);
     } catch (handlerErr) {
       console.error("Error processing share-target POST:", handlerErr);
       return res.redirect(303, "/?shared=error&msg=server_process_err");
@@ -1805,6 +1722,19 @@ app.post("/api/share-ingest", (req, res) => {
   });
 });
 
+app.get("/api/shared-voice", (req, res) => {
+  const item = loadLatestSharedMedia();
+  if (!item || !item.buffer || item.buffer.length === 0) {
+    return res.status(404).json({ success: false, error: "No shared voice available" });
+  }
+  res.setHeader("Content-Type", item.mimetype || "audio/ogg");
+  res.setHeader("Content-Length", item.buffer.length);
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(item.name)}"`);
+  return res.send(item.buffer);
+});
+
 app.get("/api/latest-opus", (req, res) => {
   const item = loadLatestSharedMedia();
   if (!item) return res.status(404).json({ success: false, error: "No shared opus audio available" });
@@ -1813,6 +1743,26 @@ app.get("/api/latest-opus", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(item.name)}"`);
   return res.send(item.buffer);
+});
+
+app.get("/api/latest-text", (req, res) => {
+  let item = serverSharedMediaStore.get("latest_text");
+  if (!item) {
+    try {
+      const p = path.join(SHARED_MEDIA_DIR, "latest_text.json");
+      if (fs.existsSync(p)) {
+        const { id } = JSON.parse(fs.readFileSync(p, "utf-8"));
+        if (id) {
+          const m = path.join(SHARED_MEDIA_DIR, `${id}.json`);
+          if (fs.existsSync(m)) item = JSON.parse(fs.readFileSync(m, "utf-8"));
+        }
+      }
+    } catch (_) {}
+  }
+  if (!item || !item.text) {
+    return res.status(404).json({ success: false, error: "No shared text available" });
+  }
+  return res.json({ success: true, text: item.text, id: item.id });
 });
 
 // Endpoint لتسليم ميتاداتا الملف المشارك لواجهة React
@@ -2441,10 +2391,22 @@ async function startServer() {
   const distPath = fs.existsSync(path.join(process.cwd(), "dist", "index.html"))
     ? path.join(process.cwd(), "dist")
     : process.cwd();
-  const hasDist = fs.existsSync(path.join(distPath, "index.html"));
   
-  // Production when NODE_ENV is production or when dist/index.html is built and not running npm run dev
-  const isDev = process.env.npm_lifecycle_event === "dev" || (process.env.NODE_ENV !== "production" && !hasDist);
+  // تقديم sw.js دائماً برؤوس تمنع التخزين المؤقت وضمان وصول التحديث فوراً
+  app.get("/sw.js", (req, res) => {
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.set("Service-Worker-Allowed", "/");
+    res.type("application/javascript");
+    const swPath = fs.existsSync(path.join(distPath, "sw.js"))
+      ? path.join(distPath, "sw.js")
+      : path.join(process.cwd(), "public", "sw.js");
+    res.sendFile(swPath);
+  });
+
+  // تحديد بيئة التشغيل: إنتاج عند تشغيل dist/server.cjs في بيئة النشر السحابي
+  const isRunningFromDist = Boolean(process.argv[1]?.includes("dist"));
+  const isProduction = process.env.NODE_ENV === "production" || isRunningFromDist;
+  const isDev = !isProduction;
 
   if (isDev) {
     const vite = await createViteServer({
@@ -2453,14 +2415,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // منع تخزين sw.js في الكاش حتى تصل التحديثات فوراً، وضمان نطاق الجذر
-    app.get("/sw.js", (req, res) => {
-      res.set("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.set("Service-Worker-Allowed", "/");
-      res.type("application/javascript");
-      res.sendFile(path.join(distPath, "sw.js"));
-    });
-
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
@@ -2468,7 +2422,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Fatwa Transcriber Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Fatwa Transcriber Server running on http://0.0.0.0:${PORT} (Mode: ${isProduction ? "Production" : "Development"})`);
   });
 }
 

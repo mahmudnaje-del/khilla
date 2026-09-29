@@ -157,3 +157,99 @@ STORAGE=server-local+client-bridge
 MAGIC_DETECTED=NONE
 REDIRECT=/?shared=opus&id=sh_srv_mukb9la3_f7fui1
 STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mulgyavy_ipu7ia]
+POST_RECEIVED
+FILE_FOUND=test-sheikh-voice.opus
+FILE_SIZE=41
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_mulgyavy_ipu7ia
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muliu7qj_tl1qzk]
+POST_RECEIVED
+WHATSAPP_VOICE_NOTE_FILE_DROPPED_BY_ANDROID
+SENDER="Ahmad"
+REDIRECT=/?shared=opus_dropped&sender=Ahmad
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muliud98_2o71m9]
+POST_RECEIVED
+FILE_FOUND=sheikh-voice.opus
+FILE_SIZE=26
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_muliud98_2o71m9
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mulj4zxd_66aby9]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=32
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_mulj4zxd_66aby9
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muljyjfr_s9jom3]
+POST_RECEIVED
+FILE_FOUND=sheikh-voice.opus
+FILE_SIZE=30
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_muljyjfr_s9jom3
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muljyxj6_fmtlx2]
+POST_RECEIVED
+FILE_FOUND=whatsapp-voice.opus
+FILE_SIZE=30
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_muljyxj6_fmtlx2
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_muljz1hb_kt09op]
+POST_RECEIVED
+FILE_FOUND=voice_khilla.opus
+FILE_SIZE=30
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_muljz1hb_kt09op
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mulk8yl5_l81nkx]
+POST_RECEIVED
+FILE_FOUND=voice-note.opus
+FILE_SIZE=47
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"opus"}
+REDIRECT=/?shared=opus&id=sh_srv_mulk8yl5_l81nkx
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mulle7jl_8nwqsi]
+POST_RECEIVED
+FILE_FOUND=WhatsApp-Voice-001.opus
+FILE_SIZE=512
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"opus"}
+REDIRECT=/?shared=opus&id=sh_srv_mulle7jl_8nwqsi
+STATUS=READY_FOR_CLIENT
+[SHARE sh_srv_mummvasm_34ftyc]
+POST_RECEIVED
+FILE_FOUND=WhatsApp Audio 2026-09-28.opus
+FILE_SIZE=14
+MIME=audio/ogg
+SOURCE=whatsapp
+STORAGE=server-local+client-bridge
+MAGIC_DETECTED={"isVideo":false,"mime":"audio/ogg","ext":"ogg"}
+REDIRECT=/?shared=opus&id=sh_srv_mummvasm_34ftyc
+STATUS=READY_FOR_CLIENT
