@@ -216,34 +216,38 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
   // استقبال تسجيل صوتي أو مرئي مُشارَك من واتساب عبر Web Share Target
   const isProcessingShareRef = useRef(false);
   const hasProcessedShareRef = useRef(false);
+  const hasAnnouncedShareMissRef = useRef(false);
   const activeProcessingPromiseRef = useRef<Promise<void> | null>(null);
 
   const processIncomingShare = async () => {
-    if (!wasOpenedFromShare()) return;
+    const fromShare = wasOpenedFromShare();
     if (hasProcessedShareRef.current) return;
     if (activeProcessingPromiseRef.current) return activeProcessingPromiseRef.current;
     if (isProcessingShareRef.current) return;
     isProcessingShareRef.current = true;
 
     activeProcessingPromiseRef.current = (async () => {
-      setIsReceivingShare(true);
+      if (fromShare) setIsReceivingShare(true);
       setErrorMessage(null);
-      setShareBlocked(false);
 
       try {
-        // 1. استلام واستخراج الملف الصوتي من كاش المشاركة المعتمد (shared-media-v1)
-        const shared = await consumeSharedAudio();
+        const shared = await consumeSharedAudio(fromShare ? 30 : 4);
 
         if (shared && shared.file && shared.file.size > 0) {
+          const stale =
+            !fromShare &&
+            typeof shared.receivedAt === "number" &&
+            Date.now() - shared.receivedAt > 10 * 60 * 1000;
+          if (!stale) {
           console.log("[SHARE-CLIENT] handleFileSelect called");
-          // تسليم الملف الحقيقي إلى منظومة التفريغ
           await handleFileSelect(shared.file);
 
-          // فحص النص المصاحب إن وُجد (سؤال السائل / كابشن واتساب)
           if (shared.text) {
             const fromCaption = questionFromSharedCaption(shared.text);
             if (fromCaption.senderName) setSharedVoiceSenderName(fromCaption.senderName);
-            if (!fromCaption.voiceCaptionOnly && fromCaption.question && isRealQuestionText(fromCaption.question)) {
+            if (fromCaption.voiceCaptionOnly && fromCaption.senderName) {
+              setQuestion(fromCaption.senderName);
+            } else if (!fromCaption.voiceCaptionOnly && fromCaption.question && isRealQuestionText(fromCaption.question)) {
               const ext = extractWhatsAppQAndA(fromCaption.question);
               if (ext.isWhatsAppPost) {
                 setQuestion(ext.question);
@@ -260,14 +264,12 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
           setErrorMessage(null);
           setShareBlocked(false);
           hasProcessedShareRef.current = true;
-
-          // التسلسل الصحيح: الحذف من الكاش يتم حصراً بعد نجاح التسليم لـ handleFileSelect
           await deleteConsumedShareCache();
           showToast(`تم استلام تسجيل جواب الشيخ بنجاح 🎙️ (جاهز للتفريغ)`, "success");
           return;
+          }
         }
 
-        // 2. إذا لم يتوفر ملف صوتي، نفحص هل المشاركة نصية
         const sharedText = await consumeSharedText();
         if (sharedText && isRealQuestionText(sharedText)) {
           const fromCaption = questionFromSharedCaption(sharedText);
@@ -281,25 +283,29 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
                 setManualRawText(ext.answer);
                 setShowManualTranscriptInput(true);
               }
-              showToast("تم استلام منشور واتساب وفصل السؤال عن الجواب بنجاح! 📝", "success");
             } else {
               setQuestion(sanitizeQuestionGreeting(targetQ));
-              showToast("تم استلام نص السؤال من واتساب بنجاح 📝", "success");
             }
-            setShareBlocked(false);
-            setErrorMessage(null);
-            hasProcessedShareRef.current = true;
-            await deleteConsumedShareCache();
-            return;
           }
         }
 
-        setShareBlocked(false);
-        await deleteConsumedShareCache();
+        if (fromShare || sharedText) {
+          setShareBlocked(true);
+          if (!hasAnnouncedShareMissRef.current) {
+            hasAnnouncedShareMissRef.current = true;
+            showToast("التطبيق فُتح لكن تسجيل واتساب لم يصل. اختر الملف من الزر بالأسفل.", "info");
+          }
+          return;
+        }
       } catch (err) {
         console.error("[SHARE-CLIENT] Error receiving share:", err);
-        setShareBlocked(false);
-        await deleteConsumedShareCache();
+        if (fromShare) {
+          setShareBlocked(true);
+          if (!hasAnnouncedShareMissRef.current) {
+            hasAnnouncedShareMissRef.current = true;
+            showToast("تعذّر قراءة تسجيل واتساب. اختر الملف يدوياً.", "info");
+          }
+        }
       } finally {
         setIsReceivingShare(false);
         isProcessingShareRef.current = false;
@@ -1211,6 +1217,23 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
       {/* WhatsApp Share Full-Screen Overlay Loader */}
       {isReceivingShare && (
         <ThinkingLogo variant="page" label="جارٍ استقبال التسجيل من واتساب..." />
+      )}
+
+      {shareBlocked && !audioFile && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-right shadow-sm">
+          <p className="font-bold font-cairo text-amber-950">المشاركة وصلت بدون التسجيل</p>
+          <p className="mt-1 text-sm font-tajawal text-stone-700 leading-relaxed">
+            واتساب فتح التطبيق، لكن ملف التسجيل الصوتي لم يُسلَّم. هذا يحدث مع بعض نسخ كروم. اختر نفس التسجيل من هاتفك.
+          </p>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#0c392c] px-4 py-2.5 text-sm font-bold font-cairo text-white"
+          >
+            <UploadCloud className="h-4 w-4" />
+            اختيار تسجيل واتساب
+          </button>
+        </div>
       )}
 
       {/* Main 2-Card Layout */}

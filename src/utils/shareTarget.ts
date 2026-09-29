@@ -20,6 +20,7 @@ export interface SharedAudioResult {
   mimeType: string;
   isVideo: boolean;
   text?: string;
+  receivedAt?: number;
 }
 
 // Backward compatibility alias
@@ -165,7 +166,7 @@ export function usableSharedQuestionText(text: string | null | undefined): strin
  * reconstructs a real File object, and returns it.
  * IMPORTANT: Does NOT delete the cache entry until deleteConsumedShareCache() is explicitly called!
  */
-export async function consumeSharedAudio(): Promise<SharedAudioResult | null> {
+export async function consumeSharedAudio(attempts = 20): Promise<SharedAudioResult | null> {
   console.log("[SHARE-CLIENT] share detected");
   console.log("[SHARE-CLIENT] opening cache " + SHARED_CACHE_NAME);
 
@@ -174,7 +175,38 @@ export async function consumeSharedAudio(): Promise<SharedAudioResult | null> {
   }
 
   // Poll cache for up to 15 attempts (~1.5s total) in case SW write completes right at navigation start
-  for (let attempt = 0; attempt < 15; attempt++) {
+  // The server share id is the reliable copy. Read it before polling an empty cache.
+  const p = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const serverId = p.get("id");
+  const sender = p.get("sender") || "";
+  if (serverId && typeof window !== "undefined") {
+    try {
+      const res = await fetch(`/api/shared-file/${encodeURIComponent(serverId)}/raw`, { cache: "no-store" });
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 0) {
+          const mimeType = (blob.type || "audio/ogg").split(";")[0];
+          const disposition = res.headers.get("Content-Disposition") || "";
+          const match = disposition.match(/filename="?([^";]+)"?/i);
+          const fileName = match ? decodeURIComponent(match[1]) : "whatsapp-voice.opus";
+          const file = new File([blob], fileName, { type: mimeType });
+          return {
+            file,
+            name: fileName,
+            size: file.size,
+            mimeType,
+            isVideo: mimeType.startsWith("video/"),
+            text: sender,
+            receivedAt: Date.now(),
+          };
+        }
+      }
+    } catch {
+      /* fall through to cache */
+    }
+  }
+
+  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     try {
       const cache = await caches.open(SHARED_CACHE_NAME);
       const audioRes = await cache.match("/__shared-audio__");
@@ -183,7 +215,7 @@ export async function consumeSharedAudio(): Promise<SharedAudioResult | null> {
       if (audioRes) {
         const blob = await audioRes.blob();
         if (blob && blob.size > 0) {
-          let meta: { name?: string; size?: number; mimeType?: string; isVideo?: boolean; text?: string } = {};
+          let meta: { name?: string; size?: number; mimeType?: string; isVideo?: boolean; text?: string; receivedAt?: number } = {};
           if (metaRes) {
             meta = await metaRes.json().catch(() => ({}));
           }
@@ -206,6 +238,7 @@ export async function consumeSharedAudio(): Promise<SharedAudioResult | null> {
             mimeType,
             isVideo,
             text,
+            receivedAt: typeof meta.receivedAt === "number" ? meta.receivedAt : Date.now(),
           };
         }
       }
@@ -213,34 +246,7 @@ export async function consumeSharedAudio(): Promise<SharedAudioResult | null> {
       console.warn("[SHARE-CLIENT] Cache read attempt error:", err);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  // Fallback: If an explicit server-side ID was passed in query parameter
-  const p = new URLSearchParams(window.location.search);
-  const serverId = p.get("id");
-  if (serverId) {
-    try {
-      const res = await fetch(`/api/shared-file/${encodeURIComponent(serverId)}/raw`, { cache: "no-store" });
-      if (res.ok) {
-        const blob = await res.blob();
-        if (blob && blob.size > 0) {
-          const mimeType = (blob.type || "audio/ogg").split(";")[0];
-          const disposition = res.headers.get("Content-Disposition") || "";
-          const match = disposition.match(/filename="?([^";]+)"?/i);
-          const fileName = match ? decodeURIComponent(match[1]) : "whatsapp-voice.opus";
-          const file = new File([blob], fileName, { type: mimeType });
-          return {
-            file,
-            name: fileName,
-            size: file.size,
-            mimeType,
-            isVideo: mimeType.startsWith("video/"),
-            text: "",
-          };
-        }
-      }
-    } catch (_) {}
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
   return null;
