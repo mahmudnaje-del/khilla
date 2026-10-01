@@ -26,6 +26,7 @@ import {
   FileText,
   BookOpen,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Fatwa, FatwaStatus, CardTemplateSettings } from "../types";
@@ -51,6 +52,7 @@ interface ReviewModalOrTabProps {
   onNavigateToArchive?: () => void;
   onUpdateTemplateSettings?: (settings: CardTemplateSettings) => void;
   showToast: (msg: string, type?: "success" | "error" | "info") => void;
+  onDeleteFatwa?: (id: string) => void;
   onFetchAllUserFatwas?: () => Promise<void> | void;
   isFetchingAllUsersFatwas?: boolean;
 }
@@ -66,6 +68,7 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
   onNavigateToArchive,
   onUpdateTemplateSettings,
   showToast,
+  onDeleteFatwa,
   onFetchAllUserFatwas,
   isFetchingAllUsersFatwas = false,
 }) => {
@@ -290,8 +293,10 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
       ...currentFatwa,
       question_original: safeOrigQ,
       question_clean: safeCleanQ,
+      question_tashkeel: safeCleanQ,
       transcription_raw: rawAnswer,
       answer_clean: finalCleanAnswer,
+      answer_tashkeel: finalCleanAnswer,
       category,
       status: finalStatus,
       has_wallahu_aalam: hasWallahuAalam,
@@ -560,16 +565,41 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
             <span>{showDiffView ? "إخفاء الفروقات" : "عرض الفروقات"}</span>
           </button>
 
+          {/* زر تعديل الفتوى ومزامنتها مع القالب */}
           <button
+            id="review-edit-fatwa-btn"
             onClick={() => setIsEditing(!isEditing)}
-            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+            className={`flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold font-cairo border transition-all cursor-pointer ${
               isEditing
-                ? "bg-amber-500 text-white border-amber-600 shadow-2xs"
-                : "bg-white text-stone-700 border-stone-300 hover:bg-stone-50"
+                ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-300"
+                : "bg-white hover:bg-amber-50 text-stone-800 border-stone-300 shadow-2xs hover:border-amber-400"
             }`}
+            title={isEditing ? "إنهاء التحرير وحفظ التغييرات" : "تعديل نص الفتوى (السؤال وجواب الشيخ) ومزامنة التعديل فوراً داخل القالب"}
           >
-            <Edit3 className="w-3.5 h-3.5 shrink-0" />
-            <span>{isEditing ? "إنهاء التحرير" : "تعديل يدوي"}</span>
+            <Edit3 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>{isEditing ? "إنهاء التحرير ✕" : "تعديل الفتوى ✏️"}</span>
+          </button>
+
+          {/* زر حذف الفتوى في الصندوق المشار إليه */}
+          <button
+            type="button"
+            id="review-delete-fatwa-btn"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `هل أنت متأكد تماماً من حذف الفتوى #${currentFatwa.fatwaNumber || ""} نهائياً؟\nسيتم تسجيل الحذف سحابياً ومحلياً ولن تظهر في المراجعة أو الأرشيف.`
+                )
+              ) {
+                if (onDeleteFatwa) {
+                  onDeleteFatwa(currentFatwa.id);
+                }
+              }
+            }}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold font-cairo bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="حذف هذه الفتوى نهائياً ومزامنة الحذف سحابياً ومحلياً"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span>حذف الفتوى</span>
           </button>
 
           {status === "معتمدة" || status === "منشورة" || currentFatwa.approved ? (
@@ -772,7 +802,16 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
 
           {isEditing ? (
             <div className="space-y-2">
-              <label className="text-xs font-bold text-stone-700">تعديل نص السؤال المنقح:</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                  <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>تعديل نص السؤال المنقح (ينعكس فوراً داخل القالب):</span>
+                </label>
+                <span className="text-[11px] text-emerald-800 font-bold bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span>متزامن لحظياً مع قالب البطاقة بالأسفل ⚡</span>
+                </span>
+              </div>
               <textarea
                 rows={3}
                 value={questionClean}
@@ -931,9 +970,16 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
           {isEditing ? (
             <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-stone-700">
-                  تعديل جواب الشيخ المنقح والمجهز للنشر:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                    <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>تعديل جواب الشيخ المنقح والمجهز للنشر:</span>
+                  </label>
+                  <span className="text-[11px] text-emerald-800 font-bold bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-500" />
+                    <span>يعدل داخل القالب لحظياً ومباشرة ⚡</span>
+                  </span>
+                </div>
                 <textarea
                   rows={8}
                   value={cleanAnswer}
@@ -959,11 +1005,12 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => handleSave()}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white shadow-sm cursor-pointer transition-all active:scale-95"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>حفظ التعديلات</span>
+                  <Save className="w-4 h-4 text-emerald-200" />
+                  <span>حفظ وتثبيت التعديلات بالقالب والأرشيف ✓</span>
                 </button>
               </div>
             </div>
@@ -1126,10 +1173,21 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
           currentFatwa={{
             ...currentFatwa,
             question_clean: questionClean,
+            question_original: questionClean,
+            question_tashkeel: questionClean,
             answer_clean: cleanAnswer,
+            answer_tashkeel: cleanAnswer,
+            category: category,
+            status: status,
+            approved: status === "معتمدة" || status === "منشورة" || currentFatwa.approved,
             has_wallahu_aalam: hasWallahuAalam,
+            updated_at: new Date().toISOString(),
           }}
+          onUpdateFatwa={onUpdateFatwa}
+          onDeleteFatwa={onDeleteFatwa}
           onUpdateTemplateSettings={onUpdateTemplateSettings || (() => {})}
+          onNavigateToTranscribe={onNavigateToTranscribe}
+          onNavigateToAdmin={onNavigateToAdmin}
           showToast={showToast}
           embedded={true}
         />

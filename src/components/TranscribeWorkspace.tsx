@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { fileToBase64, formatDuration, formatFileSize } from "../utils/audioHelper";
 import { Fatwa, TranscribeResponse } from "../types";
-import { DEFAULT_TEMPLATE_SETTINGS } from "../utils/storage";
+import { DEFAULT_TEMPLATE_SETTINGS, getPreferredTemplateStyle, setPreferredTemplateStyle } from "../utils/storage";
 import {
   wasOpenedFromShare,
   getShareTargetInfo,
@@ -133,7 +133,19 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
   const [requestTashkeel, setRequestTashkeel] = useState<boolean>(false);
   // Result view tabs & card preview style
   const [resultTextTab, setResultTextTab] = useState<"clean" | "tashkeel">("clean");
-  const [previewCardStyle, setPreviewCardStyle] = useState<"official_khalla" | "uthmanic">("official_khalla");
+  const [previewCardStyle, setPreviewCardStyle] = useState<"official_khalla" | "uthmanic">(() => {
+    const pref = getPreferredTemplateStyle();
+    return pref === "uthmanic" ? "uthmanic" : "official_khalla";
+  });
+
+  useEffect(() => {
+    const handleTemplateChanged = (e: any) => {
+      const newStyle = e.detail || getPreferredTemplateStyle();
+      setPreviewCardStyle(newStyle === "uthmanic" ? "uthmanic" : "official_khalla");
+    };
+    window.addEventListener("default-template-changed", handleTemplateChanged);
+    return () => window.removeEventListener("default-template-changed", handleTemplateChanged);
+  }, []);
 
   // Audio recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -900,9 +912,11 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
 
         const isVideoResult = isVideoProcessing || Boolean(audioFile?.isVideo) || mediaMode === "video";
         const hasTashkeelResult = Boolean(data.answer_tashkeel);
-        const resolvedStyle = (isVideoResult || hasTashkeelResult) ? "uthmanic" : previewCardStyle;
+        const preferredStyle = getPreferredTemplateStyle();
+        // Use preferred default template style (official_khalla) after transcription
+        const resolvedStyle = preferredStyle;
 
-        setPreviewCardStyle(resolvedStyle);
+        setPreviewCardStyle(resolvedStyle === "uthmanic" ? "uthmanic" : "official_khalla");
         if (hasTashkeelResult || isVideoResult) {
           setResultTextTab("tashkeel");
         }
@@ -1089,27 +1103,29 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
 
   // حفظ التعديلات اليدوية على السؤال والجواب المشكولين
   const handleSaveTashkeelEdits = () => {
-    const cleanQ = cleanTashkeelText(editableQuestionTashkeel);
-    const cleanA = cleanTashkeelText(editableAnswerTashkeel);
-    setEditableQuestionTashkeel(cleanQ);
-    setEditableAnswerTashkeel(cleanA);
+    const rawEditedQ = editableQuestionTashkeel.trim();
+    const rawEditedA = editableAnswerTashkeel.trim();
+    const cleanQ = cleanTashkeelText(rawEditedQ);
+    const cleanA = cleanTashkeelText(rawEditedA);
     setIsEditingTashkeel(false);
 
     if (latestResult) {
       const updated: TranscribeResponse = {
         ...latestResult,
-        question_tashkeel: cleanQ,
-        answer_tashkeel: cleanA,
+        question_clean: cleanQ || latestResult.question_clean,
+        question_tashkeel: rawEditedQ || latestResult.question_tashkeel,
+        answer_clean: cleanA || latestResult.answer_clean,
+        answer_tashkeel: rawEditedA || latestResult.answer_tashkeel,
       };
       setLatestResult(updated);
 
       onTranscribeComplete({
         question_original: question || cleanQ,
-        question_clean: latestResult.question_clean,
-        question_tashkeel: cleanQ,
+        question_clean: cleanQ || latestResult.question_clean,
+        question_tashkeel: rawEditedQ || latestResult.question_tashkeel,
         transcription_raw: latestResult.transcription_raw,
-        answer_clean: latestResult.answer_clean,
-        answer_tashkeel: cleanA,
+        answer_clean: cleanA || latestResult.answer_clean,
+        answer_tashkeel: rawEditedA || latestResult.answer_tashkeel,
         fatwaType: mediaMode === "video" || audioFile?.isVideo ? "moasala" : fatwaType,
         mediaType: mediaMode === "video" || audioFile?.isVideo ? "video" : (audioFile ? "audio" : "text"),
         audio_file: audioFile
@@ -1140,7 +1156,7 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
       });
     }
 
-    showToast("تم حفظ التعديلات على النص المشكول بنجاح! ✓", "success");
+    showToast("تم حفظ التعديلات وتحديث القالب بالنص المنقح والمشكول بنجاح! ✓", "success");
   };
 
   return (
@@ -2545,14 +2561,19 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
                       <button
                         type="button"
                         id="select-card-style-official"
-                        onClick={() => setPreviewCardStyle("official_khalla")}
-                        className={`px-3 py-1.5 rounded-lg font-bold font-cairo transition-all cursor-pointer ${
+                        onClick={() => {
+                          setPreviewCardStyle("official_khalla");
+                          setPreferredTemplateStyle("official_khalla");
+                          showToast("تم ضبط قالب الصفحة الرسمية كقالب افتراضي بعد التفريغ", "success");
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-bold font-cairo transition-all cursor-pointer flex items-center gap-1.5 ${
                           previewCardStyle === "official_khalla"
-                            ? "bg-white text-[#0c392c] shadow-xs"
+                            ? "bg-[#0c392c] text-amber-300 shadow-xs"
                             : "text-stone-600 hover:text-stone-900"
                         }`}
                       >
-                        <span>القالب الرسمي الأخضر</span>
+                        <Check className={`w-3.5 h-3.5 ${previewCardStyle === "official_khalla" ? "opacity-100" : "opacity-0"}`} />
+                        <span>القالب الرسمي (الافتراضي) 🌟</span>
                       </button>
 
                       <button
@@ -2572,10 +2593,10 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
                     {onNavigateToCard && (
                       <button
                         onClick={onNavigateToCard}
-                        className="text-[11px] font-cairo font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg transition-colors"
+                        className="text-[11px] font-cairo font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
                       >
-                        <Sliders className="w-3 h-3" />
-                        <span>تخصيص القالب</span>
+                        <Sliders className="w-3.5 h-3.5" />
+                        <span>تخصيص القالب والخط</span>
                       </button>
                     )}
                   </div>
@@ -2585,94 +2606,136 @@ export const TranscribeWorkspace: React.FC<TranscribeWorkspaceProps> = ({
                     <div
                       ref={directCardRef}
                       dir="rtl"
-                      className={`w-full max-w-[440px] rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative shadow-xl select-none text-right transition-all ${
+                      className={`w-full max-w-[460px] rounded-3xl p-3 sm:p-4 flex flex-col justify-between relative shadow-xl select-none text-right transition-all ${
                         previewCardStyle === "uthmanic"
                           ? "bg-[#fbf9f4] border-[3px] border-[#0c392c] outline outline-1 outline-[#caa24d] outline-offset-[-6px]"
-                          : "bg-[#f6faf8] border-2 border-[#cce5dc]"
+                          : "bg-[#fbfaf3] border-[3px] border-[#0c392c]"
                       }`}
                     >
-                      {/* Islamic Decorative Corners */}
-                      <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-[#caa24d] rounded-tr-lg opacity-90" />
-                      <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-[#caa24d] rounded-tl-lg opacity-90" />
-                      <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-[#caa24d] rounded-br-lg opacity-90" />
-                      <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-[#caa24d] rounded-bl-lg opacity-90" />
-
-                      {/* Header */}
-                      <div className="border-b pb-3 mb-3 border-[#caa24d]/30 text-center space-y-1">
-                        {previewCardStyle === "uthmanic" && (
-                          <div className="text-sm font-amiri font-bold text-[#855e16] tracking-wider mb-0.5">
-                            بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ
+                      {/* Inner gold frame for official template */}
+                      {previewCardStyle === "official_khalla" ? (
+                        <div className="bg-[#fbfaf3] border-[1.5px] border-[#caa24d] rounded-[18px] p-3.5 sm:p-4 flex-1 flex flex-col justify-between relative">
+                          {/* Official Top Emblem */}
+                          <div className="flex flex-col items-center justify-center pt-1 pb-2">
+                            <img
+                              src="/sheikh-emblem-complete.png"
+                              alt="فضيلة الدكتور عبد الباري محمد خلة"
+                              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-2xs select-none"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = "/sheikh-emblem-perfect.png";
+                              }}
+                            />
                           </div>
-                        )}
-                        <div className="text-[11px] uppercase tracking-wide font-bold text-[#0c392c] font-cairo flex items-center justify-center gap-1.5">
-                          <span>✍🏻 اطرح سؤالك والشيخ يجيب 📚</span>
-                          {previewCardStyle === "uthmanic" && (
-                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-[#855e16] font-cairo text-[9px] font-bold border border-amber-300">
-                              رسم عثماني مشكول
-                            </span>
-                          )}
-                        </div>
-                        <h1 className="text-base sm:text-lg font-bold font-cairo text-stone-900 mt-0.5">
-                          فتاوى فضيلة الشيخ د. عبد الباري خلة
-                        </h1>
-                        {previewCardStyle === "uthmanic" && (
-                          <div className="text-[11px] font-cairo text-[#caa24d] font-semibold">
-                            ﴿ فَاسْأَلُوا أَهْلَ الذِّكْرِ إِن كُنتُمْ لَا تَعْلَمُونَ ﴾
-                          </div>
-                        )}
-                      </div>
 
-                      {/* Question & Answer Body */}
-                      <div className="space-y-3 my-1">
-                        {/* Question Box */}
-                        <div className={`p-3 rounded-2xl space-y-1 ${
-                          previewCardStyle === "uthmanic"
-                            ? "bg-[#f5efe2] border border-[#e2d5bd]"
-                            : "bg-[#e6f4ee] border border-[#b6e2d3]"
-                        }`}>
-                          <div className="flex items-center gap-1 text-[11px] font-bold font-cairo text-stone-700">
-                            <HelpCircle className="w-3 h-3 text-amber-600" />
-                            <span>السؤال:</span>
-                          </div>
-                          <p className={`text-xs sm:text-sm font-semibold text-stone-900 leading-relaxed ${
-                            previewCardStyle === "uthmanic" ? "font-uthmanic text-[14px]" : "font-tajawal"
-                          }`}>
-                            {cleanTashkeelText(editableQuestionTashkeel || latestResult.question_tashkeel || latestResult.question_clean)}
-                          </p>
-                        </div>
-
-                        {/* Answer */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1 text-[11px] font-bold font-cairo text-stone-700">
-                              <FileCheck2 className="w-3 h-3 text-emerald-600" />
-                              <span>الجواب:</span>
+                          {/* Question and Answer Boxes Stack */}
+                          <div className="space-y-3.5 my-1 flex-1 flex flex-col justify-start">
+                            {/* Question Box */}
+                            <div className="rounded-xl overflow-hidden shadow-2xs">
+                              <div className="bg-[#0c3a2d] text-white font-bold text-center py-1.5 px-3 text-xs sm:text-sm font-cairo flex items-center justify-center">
+                                <span>السؤال:</span>
+                              </div>
+                              <div className="bg-white border-x-[1.6px] border-b-[1.6px] border-[#caa24d] rounded-b-xl p-3 text-right">
+                                <p className="font-tajawal text-xs sm:text-sm font-semibold text-stone-900 leading-relaxed">
+                                  {cleanTashkeelText(editableQuestionTashkeel || latestResult.question_tashkeel || latestResult.question_clean)}
+                                </p>
+                              </div>
                             </div>
-                            {latestResult.answer_tashkeel && previewCardStyle === "uthmanic" && (
-                              <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/80 px-1.5 py-0.5 rounded">
-                                تشكيل صحيح كامل ✨
-                              </span>
-                            )}
+
+                            {/* Answer Box */}
+                            <div className="rounded-xl overflow-hidden shadow-2xs flex-1 flex flex-col">
+                              <div className="bg-[#0c3a2d] text-white font-bold text-center py-1.5 px-3 text-xs sm:text-sm font-cairo flex items-center justify-center">
+                                <span>جواب فضيلة الشيخ د. عبد الباري محمد خلة:</span>
+                              </div>
+                              <div className="bg-white border-x-[1.6px] border-b-[1.6px] border-[#caa24d] rounded-b-xl p-3 sm:p-4 text-right flex-1 flex flex-col justify-between">
+                                <div className="leading-7 font-tajawal text-xs sm:text-sm text-stone-900 whitespace-pre-line">
+                                  {cleanTashkeelText(editableAnswerTashkeel || latestResult.answer_tashkeel || latestResult.answer_clean)}
+                                </div>
+                                <div className="text-left font-amiri font-bold text-[#0c392c] text-xs sm:text-sm mt-3 pt-1 border-t border-stone-200/60">
+                                  والله تعالى أعلم
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div className={`leading-7 text-[#132a22] whitespace-pre-line ${
-                            previewCardStyle === "uthmanic"
-                              ? "font-uthmanic text-[14px] sm:text-[15px] tracking-wide"
-                              : "font-tajawal text-xs sm:text-sm leading-6"
-                          }`}>
-                            {cleanTashkeelText(editableAnswerTashkeel || latestResult.answer_tashkeel || latestResult.answer_clean)}
+
+                          {/* Bottom Footer Ribbon */}
+                          <div className="pt-3 mt-2 flex items-center justify-center gap-2 text-[#0c3a2d] text-[11px] font-bold font-cairo select-none">
+                            <div className="h-[1px] bg-gradient-to-r from-transparent via-[#caa24d] to-[#caa24d] flex-1 max-w-[50px]" />
+                            <span className="text-[#caa24d]">✦</span>
+                            <span>الصفحة الرسمية للفتاوى</span>
+                            <span className="text-[#caa24d]">✦</span>
+                            <div className="h-[1px] bg-gradient-to-l from-transparent via-[#caa24d] to-[#caa24d] flex-1 max-w-[50px]" />
                           </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="p-2 sm:p-3 flex-1 flex flex-col justify-between relative">
+                          {/* Islamic Decorative Corners */}
+                          <div className="absolute top-1 right-1 w-4 h-4 border-t-2 border-r-2 border-[#caa24d] rounded-tr-lg opacity-90" />
+                          <div className="absolute top-1 left-1 w-4 h-4 border-t-2 border-l-2 border-[#caa24d] rounded-tl-lg opacity-90" />
+                          <div className="absolute bottom-1 right-1 w-4 h-4 border-b-2 border-r-2 border-[#caa24d] rounded-br-lg opacity-90" />
+                          <div className="absolute bottom-1 left-1 w-4 h-4 border-b-2 border-l-2 border-[#caa24d] rounded-bl-lg opacity-90" />
 
-                      {/* Footer */}
-                      <div className="pt-3 mt-3 border-t border-[#caa24d]/30 flex items-center justify-between text-[10px] text-stone-500">
-                        <span className="font-amiri text-xs font-bold text-[#0c392c]">
-                          والله تعالى أعلم
-                        </span>
-                        <span className="font-tajawal font-medium">
-                          فتاوى الشيخ د. عبد الباري خلة
-                        </span>
-                      </div>
+                          {/* Header */}
+                          <div className="border-b pb-3 mb-3 border-[#caa24d]/30 text-center space-y-1">
+                            <div className="text-sm font-amiri font-bold text-[#855e16] tracking-wider mb-0.5">
+                              بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ
+                            </div>
+                            <div className="text-[11px] uppercase tracking-wide font-bold text-[#0c392c] font-cairo flex items-center justify-center gap-1.5">
+                              <span>✍🏻 اطرح سؤالك والشيخ يجيب 📚</span>
+                              <span className="px-1.5 py-0.2 rounded bg-amber-100 text-[#855e16] font-cairo text-[9px] font-bold border border-amber-300">
+                                رسم عثماني مشكول
+                              </span>
+                            </div>
+                            <h1 className="text-base sm:text-lg font-bold font-cairo text-stone-900 mt-0.5">
+                              فتاوى فضيلة الشيخ د. عبد الباري خلة
+                            </h1>
+                            <div className="text-[11px] font-cairo text-[#caa24d] font-semibold">
+                              ﴿ فَاسْأَلُوا أَهْلَ الذِّكْرِ إِن كُنتُمْ لَا تَعْلَمُونَ ﴾
+                            </div>
+                          </div>
+
+                          {/* Question & Answer Body */}
+                          <div className="space-y-3 my-1">
+                            {/* Question Box */}
+                            <div className="p-3 rounded-2xl space-y-1 bg-[#f5efe2] border border-[#e2d5bd]">
+                              <div className="flex items-center gap-1 text-[11px] font-bold font-cairo text-stone-700">
+                                <HelpCircle className="w-3 h-3 text-amber-600" />
+                                <span>السؤال:</span>
+                              </div>
+                              <p className="text-xs sm:text-sm font-semibold text-stone-900 leading-relaxed font-uthmanic text-[14px]">
+                                {cleanTashkeelText(editableQuestionTashkeel || latestResult.question_tashkeel || latestResult.question_clean)}
+                              </p>
+                            </div>
+
+                            {/* Answer */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1 text-[11px] font-bold font-cairo text-stone-700">
+                                  <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                                  <span>الجواب:</span>
+                                </div>
+                                {latestResult.answer_tashkeel && (
+                                  <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/80 px-1.5 py-0.5 rounded">
+                                    تشكيل صحيح كامل ✨
+                                  </span>
+                                )}
+                              </div>
+                              <div className="leading-7 text-[#132a22] whitespace-pre-line font-uthmanic text-[14px] sm:text-[15px] tracking-wide">
+                                {cleanTashkeelText(editableAnswerTashkeel || latestResult.answer_tashkeel || latestResult.answer_clean)}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Footer */}
+                          <div className="pt-3 mt-3 border-t border-[#caa24d]/30 flex items-center justify-between text-[10px] text-stone-500">
+                            <span className="font-amiri text-xs font-bold text-[#0c392c]">
+                              والله تعالى أعلم
+                            </span>
+                            <span className="font-tajawal font-medium">
+                              فتاوى الشيخ د. عبد الباري خلة
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 

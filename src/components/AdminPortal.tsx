@@ -513,8 +513,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     const updatedData: Partial<Fatwa> = {
       question_clean: safeQuestion,
+      question_tashkeel: safeQuestion,
       question_original: sanitizeQuestionGreeting(editingFatwa.question_original || safeQuestion),
       answer_clean: finalAnswer,
+      answer_tashkeel: finalAnswer,
       category: editCategory,
       status: editStatus,
       version: (editingFatwa.version || 1) + 1,

@@ -17,16 +17,24 @@ import {
   CheckCircle2,
   HelpCircle,
   Eye,
+  Edit3,
+  Trash2,
+  Save,
+  X,
 } from "lucide-react";
 import { Fatwa, CardTemplateSettings } from "../types";
 import { sanitizeQuestionGreeting } from "../utils/greetingSanitizer";
 import { cleanTashkeelText } from "../utils/tashkeelHelper";
+import { getPreferredTemplateStyle, setPreferredTemplateStyle } from "../utils/storage";
 
 interface ImageCardGeneratorProps {
   currentFatwa: Fatwa | null;
   onUpdateTemplateSettings?: (settings: CardTemplateSettings) => void;
+  onUpdateFatwa?: (updated: Fatwa) => void;
+  onDeleteFatwa?: (id: string) => void;
   onNavigateToTranscribe?: () => void;
   onNavigateToAdmin?: () => void;
+  onOpenArabicDetails?: (fatwa: Fatwa) => void;
   showToast: (msg: string, type?: "success" | "error" | "info") => void;
   embedded?: boolean;
 }
@@ -48,18 +56,82 @@ const GoldIslamicStar: React.FC<{ className?: string }> = ({ className = "w-4 h-
 export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
   currentFatwa,
   onUpdateTemplateSettings,
+  onUpdateFatwa,
+  onDeleteFatwa,
   onNavigateToTranscribe,
   onNavigateToAdmin,
+  onOpenArabicDetails,
   showToast,
   embedded = false,
 }) => {
-  // 1. Template style
-  const [templateStyle, setTemplateStyle] = useState<"official_khalla" | "classic" | "uthmanic">(
-    currentFatwa?.template_settings?.templateStyle || (currentFatwa?.fatwaType === "moasala" ? "uthmanic" : "official_khalla")
+  // Direct text editing on the card itself so transcribers can modify text and see it in the card immediately!
+  const [isEditingFatwa, setIsEditingFatwa] = useState(false);
+  const [editQuestionText, setEditQuestionText] = useState(
+    currentFatwa?.question_clean || currentFatwa?.question_original || ""
+  );
+  const [editAnswerText, setEditAnswerText] = useState(
+    currentFatwa?.answer_clean || currentFatwa?.transcription_raw || ""
   );
 
+  useEffect(() => {
+    if (currentFatwa) {
+      setEditQuestionText(currentFatwa.question_clean || currentFatwa.question_original || "");
+      setEditAnswerText(currentFatwa.answer_clean || currentFatwa.transcription_raw || "");
+    }
+  }, [
+    currentFatwa?.id,
+    currentFatwa?.question_clean,
+    currentFatwa?.answer_clean,
+    currentFatwa?.answer_tashkeel,
+    currentFatwa?.updated_at,
+  ]);
+
+  const handleSaveCardEdit = () => {
+    if (!currentFatwa) return;
+    const safeQ = sanitizeQuestionGreeting(editQuestionText);
+    const updated: Fatwa = {
+      ...currentFatwa,
+      question_clean: safeQ,
+      question_original: sanitizeQuestionGreeting(currentFatwa.question_original || safeQ),
+      question_tashkeel: safeQ,
+      answer_clean: editAnswerText,
+      answer_tashkeel: editAnswerText,
+      reviewed: true,
+      updated_at: new Date().toISOString(),
+    };
+    if (onUpdateFatwa) {
+      onUpdateFatwa(updated);
+    }
+    setIsEditingFatwa(false);
+    showToast("تم تحديث نص الفتوى داخل القالب ومزامنة التعديلات بنجاح! ✓", "success");
+  };
+
+  // Preferred default template across application (defaults to official_khalla)
+  const [preferredDefault, setPreferredDefault] = useState<"official_khalla" | "classic" | "uthmanic">(
+    () => getPreferredTemplateStyle()
+  );
+
+  // 1. Template style
+  const [templateStyle, setTemplateStyle] = useState<"official_khalla" | "classic" | "uthmanic">(
+    currentFatwa?.template_settings?.templateStyle || getPreferredTemplateStyle()
+  );
+
+  useEffect(() => {
+    const handleTemplateChanged = (e: any) => {
+      const newStyle = e.detail || getPreferredTemplateStyle();
+      setPreferredDefault(newStyle);
+    };
+    window.addEventListener("default-template-changed", handleTemplateChanged);
+    return () => window.removeEventListener("default-template-changed", handleTemplateChanged);
+  }, []);
+
+  // Check if answer_tashkeel is out of sync with answer_clean (due to manual editing)
+  const bareTashkeel = (currentFatwa?.answer_tashkeel || "").replace(/[\u064B-\u065F\u0670\s]/g, "");
+  const bareClean = (currentFatwa?.answer_clean || "").replace(/[\u064B-\u065F\u0670\s]/g, "");
+  const hasStaleTashkeel = bareTashkeel.length > 0 && bareClean.length > 0 && bareTashkeel !== bareClean;
+
   const [useTashkeelText, setUseTashkeelText] = useState<boolean>(
-    !!currentFatwa?.answer_tashkeel
+    !!currentFatwa?.answer_tashkeel && !hasStaleTashkeel
   );
 
   // 2. Aspect ratio / sizing (defaults to square 1:1 for perfect social and print card)
@@ -95,17 +167,32 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
   useEffect(() => {
     if (currentFatwa) {
       setTemplateStyle(
-        currentFatwa.template_settings?.templateStyle ||
-          (currentFatwa.fatwaType === "moasala" ? "uthmanic" : "official_khalla")
+        currentFatwa.template_settings?.templateStyle || getPreferredTemplateStyle()
       );
-      setUseTashkeelText(!!currentFatwa.answer_tashkeel);
+      setUseTashkeelText(!!currentFatwa.answer_tashkeel && !hasStaleTashkeel);
       setAspectRatio(currentFatwa.template_settings?.aspectRatio || "auto");
       setTheme(currentFatwa.template_settings?.theme || "emerald");
       setFontSize(currentFatwa.template_settings?.fontSize || "auto");
       setShowWallahuAalam(true);
       setCurrentPage(1);
     }
-  }, [currentFatwa?.id, currentFatwa?.answer_tashkeel, currentFatwa?.fatwaType]);
+  }, [
+    currentFatwa?.id,
+    currentFatwa?.question_clean,
+    currentFatwa?.answer_clean,
+    currentFatwa?.answer_tashkeel,
+    currentFatwa?.fatwaType,
+    currentFatwa?.updated_at,
+    hasStaleTashkeel,
+  ]);
+
+  const handleSetAsDefault = (style: "official_khalla" | "classic" | "uthmanic", label: string) => {
+    setPreferredTemplateStyle(style);
+    setPreferredDefault(style);
+    setTemplateStyle(style);
+    triggerSaveSettings({ templateStyle: style });
+    showToast(`تم ضبط ${label} كقالب افتراضي بعد التفريغ بنجاح!`, "success");
+  };
 
   // Persist template settings change
   const triggerSaveSettings = (updates: Partial<CardTemplateSettings>) => {
@@ -159,12 +246,24 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
     );
   }
 
-  // Question & Answer texts
-  const cleanQ = sanitizeQuestionGreeting(currentFatwa.question_clean || currentFatwa.question_original || "");
+  // Question & Answer texts (Instant live synchronization during edit)
+  const cleanQ = sanitizeQuestionGreeting(
+    isEditingFatwa
+      ? editQuestionText
+      : currentFatwa.question_clean || currentFatwa.question_original || ""
+  );
+
+  const activeAnswerText = isEditingFatwa
+    ? editAnswerText
+    : currentFatwa.answer_clean || currentFatwa.transcription_raw || "";
+
   const rawAnswer =
-    (useTashkeelText || templateStyle === "uthmanic") && currentFatwa.answer_tashkeel
+    !isEditingFatwa &&
+    !hasStaleTashkeel &&
+    (useTashkeelText || templateStyle === "uthmanic") &&
+    currentFatwa.answer_tashkeel
       ? currentFatwa.answer_tashkeel
-      : currentFatwa.answer_clean || currentFatwa.transcription_raw || "";
+      : activeAnswerText;
 
   // Smart Adaptive Typography calculation matching original image proportions
   const getAdaptiveFont = (textLength: number) => {
@@ -475,6 +574,42 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
           </button>
 
           <button
+            type="button"
+            onClick={() => setIsEditingFatwa(!isEditingFatwa)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold font-cairo border transition-all cursor-pointer ${
+              isEditingFatwa
+                ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm"
+                : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-2xs"
+            }`}
+            title="تعديل نصوص الفتوى وملاحظة التحديث الفوري داخل القالب"
+          >
+            <Edit3 className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+            <span>{isEditingFatwa ? "إغلاق التحرير ✕" : "تعديل نص الفتوى ✏️"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `هل أنت متأكد تماماً من حذف الفتوى #${currentFatwa.fatwaNumber || ""} نهائياً؟\nسيتم تسجيل الحذف سحابياً ومحلياً ولن تظهر في البطاقات أو الأرشيف.`
+                )
+              ) {
+                if (onDeleteFatwa) {
+                  onDeleteFatwa(currentFatwa.id);
+                } else {
+                  showToast("تعذر استدعاء دالة الحذف", "error");
+                }
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold font-cairo bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="حذف هذه الفتوى نهائياً ومزامنة الحذف"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span>حذف الفتوى</span>
+          </button>
+
+          <button
             onClick={handleDownloadImage}
             disabled={isExporting}
             className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0c3a2d] hover:bg-[#14532d] text-white shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
@@ -484,6 +619,86 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Inline Fatwa Content Editor (Updates the card in real-time) */}
+      {isEditingFatwa && (
+        <div className="bg-gradient-to-r from-amber-50 via-white to-amber-50 rounded-2xl p-5 border-2 border-amber-300 shadow-md space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between border-b border-amber-200 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Edit3 className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold font-cairo text-stone-900">
+                  تعديل نص الفتوى وملاحظة التحديث الفوري داخل القالب
+                </h3>
+                <p className="text-[11px] text-stone-500">
+                  أي تعديل تكتبه هنا ينعكس مباشرة ولحظياً على بطاقة القالب الرسمية بالأسفل
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsEditingFatwa(false)}
+              className="text-stone-400 hover:text-stone-700 p-1.5 rounded-lg hover:bg-amber-100 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-stone-700 flex items-center justify-between">
+                <span>نص السؤال:</span>
+                <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded">
+                  معاينة حية في القالب ⚡
+                </span>
+              </label>
+              <textarea
+                rows={3}
+                value={editQuestionText}
+                onChange={(e) => setEditQuestionText(e.target.value)}
+                className="w-full p-3 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                placeholder="اكتب أو عدل نص السؤال..."
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-stone-700 flex items-center justify-between">
+                <span>نص جواب فضيلة الشيخ:</span>
+                <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded">
+                  تحديث فوري بالبطاقة ⚡
+                </span>
+              </label>
+              <textarea
+                rows={6}
+                value={editAnswerText}
+                onChange={(e) => setEditAnswerText(e.target.value)}
+                className="w-full p-3 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none leading-relaxed font-tajawal"
+                placeholder="اكتب أو عدل نص جواب الشيخ..."
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-200/80">
+            <button
+              type="button"
+              onClick={() => setIsEditingFatwa(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600 hover:bg-stone-100 border border-stone-300 cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCardEdit}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-bold bg-[#0c3a2d] hover:bg-[#14532d] text-white shadow-sm cursor-pointer active:scale-95"
+            >
+              <Save className="w-3.5 h-3.5 text-amber-300" />
+              <span>حفظ وتثبيت التعديل في القالب والبيانات ✓</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mobile-Friendly Toggle Bar (Preview vs Settings) */}
       <div className="lg:hidden flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200">
@@ -529,11 +744,26 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
               نمط القالب:
             </label>
             <div className="grid grid-cols-1 gap-2">
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
+                id="template-style-official-btn"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateStyle("official_khalla");
+                    triggerSaveSettings({ templateStyle: "official_khalla" });
+                    if (preferredDefault !== "official_khalla") {
+                      handleSetAsDefault("official_khalla", "قالب الصفحة الرسمية");
+                    }
+                  }
+                }}
                 onClick={() => {
                   setTemplateStyle("official_khalla");
                   triggerSaveSettings({ templateStyle: "official_khalla" });
+                  if (preferredDefault !== "official_khalla") {
+                    handleSetAsDefault("official_khalla", "قالب الصفحة الرسمية");
+                  }
                 }}
                 className={`p-3 rounded-2xl border text-right transition-all flex items-start gap-2.5 cursor-pointer ${
                   templateStyle === "official_khalla"
@@ -550,23 +780,57 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
                 >
                   {templateStyle === "official_khalla" && <Check className="w-3 h-3 stroke-[3]" />}
                 </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-bold text-xs font-cairo text-stone-900">
                       قالب الصفحة الرسمية (المعتمد الأصلي)
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300/80">
                       طبق الأصل
                     </span>
+                    {preferredDefault === "official_khalla" && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0c3a2d] text-amber-300 border border-[#0c3a2d] flex items-center gap-1 shadow-2xs">
+                        <CheckCircle2 className="w-3 h-3 text-amber-300" />
+                        <span>القالب الافتراضي بعد التفريغ</span>
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-stone-500 mt-1 leading-relaxed">
                     إطار أخضر رفيع مع إطار داخلي مذهب، ترويسات الصناديق خضراء ملكية، والتذييل الأندلسي المعتمد.
                   </p>
+                  <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center justify-between flex-wrap gap-1.5">
+                    {preferredDefault === "official_khalla" ? (
+                      <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>معتمد تلقائياً كقالب افتراضي لجميع الفتاوى المفرغة</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetAsDefault("official_khalla", "قالب الصفحة الرسمية");
+                        }}
+                        className="text-[11px] font-bold text-[#0c3a2d] bg-amber-100/90 hover:bg-amber-200 text-amber-950 px-2.5 py-1 rounded-lg border border-amber-300 flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-700" />
+                        <span>ضبط كقالب افتراضي بعد التفريغ</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </div>
 
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateStyle("classic");
+                    triggerSaveSettings({ templateStyle: "classic" });
+                  }
+                }}
                 onClick={() => {
                   setTemplateStyle("classic");
                   triggerSaveSettings({ templateStyle: "classic" });
@@ -586,20 +850,56 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
                 >
                   {templateStyle === "classic" && <Check className="w-3 h-3 stroke-[3]" />}
                 </div>
-                <div>
-                  <span className="font-bold text-xs font-cairo text-stone-900 block">
-                    القالب الكلاسيكي الملون
-                  </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-xs font-cairo text-stone-900 block">
+                      القالب الكلاسيكي الملون
+                    </span>
+                    {preferredDefault === "classic" && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-700 text-white flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>القالب الافتراضي بعد التفريغ</span>
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-stone-500 mt-1 leading-relaxed">
                     أنماط لونية متعددة مع إمكانية تقسيم الإجابات الطويلة إلى صفحات متعاقبة.
                   </p>
+                  <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center justify-between flex-wrap gap-1.5">
+                    {preferredDefault === "classic" ? (
+                      <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>معتمد تلقائياً كقالب افتراضي بعد التفريغ</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetAsDefault("classic", "القالب الكلاسيكي");
+                        }}
+                        className="text-[10px] font-semibold text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded-md border border-stone-300 transition-all cursor-pointer"
+                      >
+                        تعيين كافتراضي بعد التفريغ
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </div>
 
               {/* بطاقة الخط العثماني (مصحف شريف / تشكيل كامل) */}
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 id="template-style-uthmanic-btn"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateStyle("uthmanic");
+                    setAspectRatio("1:1");
+                    triggerSaveSettings({ templateStyle: "uthmanic", aspectRatio: "1:1" });
+                  }
+                }}
                 onClick={() => {
                   setTemplateStyle("uthmanic");
                   setAspectRatio("1:1");
@@ -620,20 +920,45 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
                 >
                   {templateStyle === "uthmanic" && <Check className="w-3 h-3 stroke-[3]" />}
                 </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-bold text-xs font-cairo text-stone-900">
                       بطاقة الخط العثماني (مصحف شريف / تشكيل كامل)
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-200/90 text-amber-950 border border-amber-400">
                       رسم عثماني 📜
                     </span>
+                    {preferredDefault === "uthmanic" && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#996515] text-amber-100 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>القالب الافتراضي بعد التفريغ</span>
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-stone-500 mt-1 leading-relaxed">
                     خط قرآني عثماني مذهب ومضبوط، بسملة خطية ﷽، تشكيل كامل وصحيح للأدلة والآيات ﴿ ﴾، وإطار مصحفي فاخر.
                   </p>
+                  <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center justify-between flex-wrap gap-1.5">
+                    {preferredDefault === "uthmanic" ? (
+                      <span className="text-[11px] font-bold text-[#996515] flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-[#996515]" />
+                        <span>معتمد تلقائياً كقالب افتراضي بعد التفريغ</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetAsDefault("uthmanic", "بطاقة الخط العثماني");
+                        }}
+                        className="text-[10px] font-semibold text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded-md border border-stone-300 transition-all cursor-pointer"
+                      >
+                        تعيين كافتراضي بعد التفريغ
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </div>
             </div>
 
             {/* Tashkeel text toggle when available */}
@@ -1113,7 +1438,7 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
                       </div>
                       <div className="p-2.5 sm:p-3 text-right">
                         <p className="font-uthmanic text-xs sm:text-[13px] text-stone-900 leading-snug sm:leading-relaxed font-semibold">
-                          {cleanTashkeelText(cleanQ)}
+                          {cleanQ}
                         </p>
                       </div>
                     </div>
@@ -1138,7 +1463,7 @@ export const ImageCardGenerator: React.FC<ImageCardGeneratorProps> = ({
                               : "text-[11px] sm:text-[12px] leading-normal sm:leading-5"
                           }`}
                         >
-                          {cleanTashkeelText(rawAnswer)}
+                          {rawAnswer}
                         </div>
                       </div>
                     </div>

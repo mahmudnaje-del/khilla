@@ -31,6 +31,7 @@ import {
   clearAllFatwasFromStorage,
   loadFatwasFromIndexedDB,
   DEFAULT_TEMPLATE_SETTINGS,
+  getPreferredTemplateStyle,
   recordDeletedFatwa,
   isFatwaDeleted,
   reconcileFatwasWithCloud,
@@ -438,8 +439,8 @@ export default function App() {
     const finalStatus: FatwaStatus = isApproved ? "معتمدة" : "تحتاج مراجعة";
 
     const isVideo = newFatwaData.mediaType === "video" || Boolean(newFatwaData.audio_file?.isVideo);
-    const hasTashkeel = Boolean(newFatwaData.answer_tashkeel);
-    const defaultStyle = (isVideo || hasTashkeel || newFatwaData.fatwaType === "moasala") ? "uthmanic" : "official_khalla";
+    const preferredStyle = getPreferredTemplateStyle();
+    const defaultStyle = newFatwaData.template_settings?.templateStyle || preferredStyle;
 
     const newFatwa: Fatwa = {
       id: newFatwaData.id || `fatwa-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
@@ -581,6 +582,7 @@ export default function App() {
         pendingSync: true,
         template_settings: {
           ...DEFAULT_TEMPLATE_SETTINGS,
+          templateStyle: getPreferredTemplateStyle(),
         },
       };
     });
@@ -962,6 +964,7 @@ export default function App() {
                   fatwas={fatwas}
                   onSelectFatwa={(f) => setCurrentFatwa(f)}
                   onUpdateFatwa={handleUpdateFatwa}
+                  onDeleteFatwa={handleDeleteFatwa}
                   onNavigateToCard={() => setActiveTab("card")}
                   onNavigateToTranscribe={() => setActiveTab("transcribe")}
                   onNavigateToAdmin={() => setActiveTab("admin")}
@@ -986,6 +989,8 @@ export default function App() {
                 <ImageCardGenerator
                   currentFatwa={currentFatwa}
                   onUpdateTemplateSettings={handleUpdateTemplateSettings}
+                  onUpdateFatwa={handleUpdateFatwa}
+                  onDeleteFatwa={handleDeleteFatwa}
                   onNavigateToTranscribe={() => setActiveTab("transcribe")}
                   onNavigateToAdmin={() => setActiveTab("admin")}
                   showToast={showToast}

@@ -1,4 +1,27 @@
 import { Fatwa, CardTemplateSettings } from "../types";
+
+export const PREFERRED_TEMPLATE_STYLE_KEY = "sheikh_khalla_preferred_template_style";
+
+export function getPreferredTemplateStyle(): "official_khalla" | "classic" | "uthmanic" {
+  try {
+    if (typeof localStorage === "undefined") return "official_khalla";
+    const saved = localStorage.getItem(PREFERRED_TEMPLATE_STYLE_KEY);
+    if (saved === "official_khalla" || saved === "classic" || saved === "uthmanic") {
+      return saved;
+    }
+  } catch {}
+  return "official_khalla";
+}
+
+export function setPreferredTemplateStyle(style: "official_khalla" | "classic" | "uthmanic"): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(PREFERRED_TEMPLATE_STYLE_KEY, style);
+      window.dispatchEvent(new CustomEvent("default-template-changed", { detail: style }));
+    }
+  } catch {}
+}
+
 export const DEFAULT_TEMPLATE_SETTINGS: CardTemplateSettings = {
   templateStyle: "official_khalla",
   aspectRatio: "auto",
