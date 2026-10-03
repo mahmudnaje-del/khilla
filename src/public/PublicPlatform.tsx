@@ -5,8 +5,10 @@ import {
   Compass,
   Home,
   Menu,
+  Moon,
   Search,
   Share2,
+  Sun,
   Volume2,
   X,
 } from "lucide-react";
@@ -87,12 +89,28 @@ export function PublicPlatform({ fatwas, onOpenAdmin }: PublicPlatformProps) {
     return () => window.removeEventListener("popstate", sync);
   }, []);
 
+  const dark =
+    prefs.theme === "dark" ||
+    (prefs.theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
   useEffect(() => {
-    const root = document.documentElement;
-    const dark = prefs.theme === "dark" || (prefs.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    root.classList.toggle("public-dark", dark);
-    return () => root.classList.remove("public-dark");
+    document.documentElement.classList.toggle("public-dark", dark);
+    return () => document.documentElement.classList.remove("public-dark");
+  }, [dark]);
+
+  useEffect(() => {
+    if (prefs.theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setPrefs(loadPrefs());
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, [prefs.theme]);
+
+  const setTheme = (theme: ReadingPrefs["theme"]) => {
+    const next = { ...prefs, theme };
+    setPrefs(next);
+    savePrefs(next);
+  };
 
   const flash = (message: string) => {
     setNotice(message);
@@ -113,13 +131,13 @@ export function PublicPlatform({ fatwas, onOpenAdmin }: PublicPlatformProps) {
   const page = renderPage();
 
   return (
-    <div className="public-shell min-h-screen bg-[#f6f1e7] text-stone-900" dir="rtl">
-      <PublicHeader path={path} onNavigate={go} online={online} onOpenAdmin={onOpenAdmin} />
+    <div className="public-shell min-h-screen" data-theme={dark ? "dark" : "light"} dir="rtl">
+      <PublicHeader path={path} onNavigate={go} online={online} onOpenAdmin={onOpenAdmin} dark={dark} onToggleTheme={() => setTheme(dark ? "light" : "dark")} />
       <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-4 sm:px-6 lg:pb-16">{page}</main>
       <PublicFooter onNavigate={go} />
       <BottomNav path={path} onNavigate={go} />
       {notice && (
-        <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full bg-[#0c392c] px-4 py-2 text-sm text-white shadow-lg">
+        <div className="pub-solid fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm shadow-lg">
           {notice}
         </div>
       )}
@@ -215,11 +233,15 @@ function PublicHeader({
   onNavigate,
   online,
   onOpenAdmin,
+  dark,
+  onToggleTheme,
 }: {
   path: string;
   onNavigate: (path: string) => void;
   online: boolean;
   onOpenAdmin: () => void;
+  dark: boolean;
+  onToggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const admin = Boolean(getAdminSession());
@@ -231,41 +253,44 @@ function PublicHeader({
     ["/about", "عن الشيخ"],
   ] as const;
   return (
-    <header className="sticky top-0 z-40 border-b border-[#e6dcc8] bg-[#f6f1e7]/95 backdrop-blur">
+    <header className="pub-header sticky top-0 z-40">
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
         <button type="button" onClick={() => onNavigate("/")} className="flex min-w-0 items-center gap-2 text-right">
-          <img src="/icon-app.png" alt="" className="h-10 w-10 rounded-xl object-cover" />
+          <img src="/icon-app.png" alt="" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-[var(--line)]" />
           <span className="min-w-0">
-            <span className="block truncate font-cairo text-sm font-bold text-[#0c392c]">فتاوى الشيخ خلة</span>
-            <span className="block text-[11px] text-stone-500">{online ? "متصل" : "غير متصل"}</span>
+            <span className="pub-brand block truncate font-cairo text-sm font-bold">فتاوى الشيخ خلة</span>
+            <span className="pub-muted block text-[11px]">{online ? "متصل · الأرشيف محدّث" : "غير متصل · تقرأ من المحفوظ"}</span>
           </span>
         </button>
         <div className="ms-auto hidden items-center gap-4 lg:flex">
           {links.map(([href, label]) => (
-            <button key={href} type="button" onClick={() => onNavigate(href)} className={`text-sm ${path === href ? "font-bold text-[#0c392c]" : "text-stone-600"}`}>
+            <button key={href} type="button" onClick={() => onNavigate(href)} className={`text-sm ${path === href ? "pub-nav-active" : "pub-nav-idle"}`}>
               {label}
             </button>
           ))}
-          <button type="button" onClick={() => onNavigate("/search")} className="rounded-full bg-[#0c392c] px-3 py-1.5 text-sm text-white">بحث</button>
+          <button type="button" onClick={() => onNavigate("/search")} className="pub-solid rounded-full px-3 py-1.5 text-sm">بحث</button>
           {admin && (
-            <button type="button" onClick={onOpenAdmin} className="text-sm text-[#8a6a32]">غرفة التحرير</button>
+            <button type="button" onClick={onOpenAdmin} className="pub-gold text-sm">غرفة التحرير</button>
           )}
         </div>
-        <button type="button" className="ms-auto rounded-xl p-2 lg:hidden" onClick={() => setOpen(true)} aria-label="القائمة">
+        <button type="button" onClick={onToggleTheme} className="pub-chip ms-auto flex h-11 w-11 items-center justify-center rounded-2xl lg:ms-0" aria-label={dark ? "الوضع الفاتح" : "الوضع الداكن"}>
+          {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+        </button>
+        <button type="button" className="pub-chip flex h-11 w-11 items-center justify-center rounded-2xl lg:hidden" onClick={() => setOpen(true)} aria-label="القائمة">
           <Menu className="h-5 w-5" />
         </button>
       </div>
       {open && (
-        <div className="fixed inset-0 z-50 bg-black/40 lg:hidden" onClick={() => setOpen(false)}>
-          <nav className="absolute inset-x-0 top-0 space-y-1 bg-[#fbf7f0] p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-2 flex justify-between">
-              <strong>القائمة</strong>
+        <div className="fixed inset-0 z-50 bg-black/50 lg:hidden" onClick={() => setOpen(false)}>
+          <nav className="pub-bg-2 absolute inset-x-3 top-3 space-y-1 rounded-3xl p-4 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <strong className="font-cairo">القائمة</strong>
               <button type="button" onClick={() => setOpen(false)} aria-label="إغلاق"><X className="h-5 w-5" /></button>
             </div>
             {[...links, ["/search", "البحث"], ["/settings", "إعدادات القراءة"], ["/offline", "بدون اتصال"]].map(([href, label]) => (
-              <button key={href} type="button" className="block w-full rounded-xl px-3 py-3 text-right text-base" onClick={() => { setOpen(false); onNavigate(href); }}>{label}</button>
+              <button key={href} type="button" className="block w-full rounded-2xl px-3 py-3 text-right text-base" onClick={() => { setOpen(false); onNavigate(href); }}>{label}</button>
             ))}
-            <button type="button" className="block w-full rounded-xl px-3 py-3 text-right text-stone-500" onClick={() => { setOpen(false); onOpenAdmin(); }}>دخول المحررين</button>
+            <button type="button" className="pub-muted block w-full rounded-2xl px-3 py-3 text-right" onClick={() => { setOpen(false); onOpenAdmin(); }}>دخول المحررين</button>
           </nav>
         </div>
       )}
@@ -282,13 +307,15 @@ function BottomNav({ path, onNavigate }: { path: string; onNavigate: (path: stri
     ["/settings", "المزيد", Menu],
   ] as const;
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e6dcc8] bg-[#fbf7f0]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+    <nav className="pub-bottom fixed inset-x-0 bottom-0 z-40 px-2 pb-[env(safe-area-inset-bottom)] lg:hidden">
       <div className="grid grid-cols-5">
         {items.map(([href, label, Icon]) => {
           const active = path === href || (href !== "/" && path.startsWith(href));
           return (
-            <button key={href} type="button" onClick={() => onNavigate(href)} className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] ${active ? "font-bold text-[#0c392c]" : "text-stone-500"}`}>
-              <Icon className="h-5 w-5" />
+            <button key={href} type="button" onClick={() => onNavigate(href)} className={`flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] ${active ? "pub-nav-active" : "pub-nav-idle"}`}>
+              <span className={`flex h-8 w-12 items-center justify-center rounded-full ${active ? "pub-wash" : ""}`}>
+                <Icon className="h-5 w-5" />
+              </span>
               {label}
             </button>
           );
@@ -300,10 +327,10 @@ function BottomNav({ path, onNavigate }: { path: string; onNavigate: (path: stri
 
 function PublicFooter({ onNavigate }: { onNavigate: (path: string) => void }) {
   return (
-    <footer className="mx-auto hidden max-w-5xl px-6 pb-10 text-sm text-stone-500 lg:block">
-      <div className="flex items-center justify-between border-t border-[#e6dcc8] pt-6">
-        <p>منصة فتاوى فضيلة الشيخ د. عبد الباري خلة. البحث يسترجع الفتاوى المنشورة ولا ينشئ حكماً.</p>
-        <button type="button" onClick={() => onNavigate("/about")} className="text-[#0c392c]">عن المنصة</button>
+    <footer className="pub-muted mx-auto hidden max-w-5xl px-6 pb-10 text-sm lg:block">
+      <div className="pub-line flex items-center justify-between border-t pt-6">
+        <p>منصة فتاوى فضيلة الشيخ د. عبد الباري خلة. البحث يسترجع الفتاوى المعتمدة ولا ينشئ حكماً.</p>
+        <button type="button" onClick={() => onNavigate("/about")} className="pub-brand">عن المنصة</button>
       </div>
     </footer>
   );
@@ -330,29 +357,40 @@ function HomePage({
   const featured = published.filter((fatwa) => fatwa.isFeatured).slice(0, 4);
   return (
     <div className="space-y-8">
-      <section className="rounded-3xl border border-[#e6dcc8] bg-white px-4 py-6 sm:px-8">
-        <p className="text-sm text-[#8a6a32]">أرشيف علمي، لا محادثة آلية</p>
-        <h1 className="mt-2 font-cairo text-2xl font-bold leading-snug text-[#0c392c] sm:text-4xl">ابحث في فتاوى الشيخ د. عبد الباري خلة</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-7 text-stone-600">اكتب سؤالك، وسنبحث في الفتاوى المعتمدة. المنصة تسترجع فتوى الشيخ ولا تؤلف جواباً.</p>
+      <section className="pub-card rounded-[28px] px-4 py-6 sm:px-8">
+        <p className="pub-kicker text-sm">أرشيف علمي، لا محادثة آلية</p>
+        <hr className="pub-rule mt-3" />
+        <h1 className="pub-brand mt-3 font-cairo text-[1.65rem] font-bold leading-snug sm:text-4xl">ابحث في فتاوى الشيخ د. عبد الباري خلة</h1>
+        <p className="pub-muted mt-3 max-w-2xl text-sm leading-8">اكتب سؤالك، وسنبحث في الفتاوى المعتمدة. المنصة تسترجع فتوى الشيخ ولا تؤلف جواباً.</p>
         <SearchBox onSubmit={(value) => { rememberSearch(value); onNavigate(`/search?q=${encodeURIComponent(value)}`); }} />
         <div className="mt-3 flex flex-wrap gap-2">
           {["هل يجوز جمع الصلاة للمسافر؟", "متى تجب زكاة المال؟", "حكم سجود السهو؟"].map((example) => (
-            <button key={example} type="button" onClick={() => onNavigate(`/search?q=${encodeURIComponent(example)}`)} className="rounded-full border border-[#e6dcc8] bg-[#fbf7f0] px-3 py-2 text-xs text-stone-700">
+            <button key={example} type="button" onClick={() => onNavigate(`/search?q=${encodeURIComponent(example)}`)} className="pub-chip rounded-full px-3 py-2 text-xs">
               {example}
             </button>
           ))}
         </div>
+        <NumberJump onNavigate={onNavigate} />
       </section>
+      {recent[0] && (
+        <button type="button" onClick={() => onOpen(recent[0])} className="pub-card flex w-full items-center justify-between rounded-2xl px-4 py-3 text-right">
+          <span>
+            <span className="pub-gold block text-xs">تابع من حيث توقفت</span>
+            <span className="mt-1 block font-bold">{snippet(publicQuestion(recent[0]), 72)}</span>
+          </span>
+          <span className="pub-muted text-xs">فتوى {recent[0].fatwaNumber}</span>
+        </button>
+      )}
 
       {categories.length > 0 && (
         <section>
           <SectionTitle title="التصنيفات" action="عرض الكل" onAction={() => onNavigate("/categories")} />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {categories.map((category) => (
-              <button key={category.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(category.name)}`)} className="pub-card min-h-28 rounded-2xl border border-[#e6dcc8] bg-white p-3 text-right">
-                <BookOpen className="mb-2 h-4 w-4 text-[#0c392c]" />
-                <span className="block font-bold">{category.name}</span>
-                <span className="mt-1 block text-xs text-stone-500">{category.count} فتوى</span>
+              <button key={category.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(category.name)}`)} className="pub-card min-h-32 rounded-2xl p-4 text-right">
+                <BookOpen className="pub-brand mb-3 h-4 w-4" />
+                <span className="block font-cairo font-bold leading-6">{category.name}</span>
+                <span className="pub-gold mt-2 block text-xs">{category.count} فتوى</span>
               </button>
             ))}
           </div>
@@ -371,7 +409,7 @@ function HomePage({
         {published.length === 0 ? (
           <Empty text="لا توجد فتاوى معتمدة للعرض بعد." />
         ) : (
-          <div className="space-y-3">{published.slice(0, 6).map((fatwa) => <FatwaCard key={fatwa.id} fatwa={fatwa} saved={saved.includes(fatwa.id)} onOpen={onOpen} onSave={onSave} />)}</div>
+          <div className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0">{published.slice(0, 6).map((fatwa) => <FatwaCard key={fatwa.id} fatwa={fatwa} saved={saved.includes(fatwa.id)} onOpen={onOpen} onSave={onSave} />)}</div>
         )}
       </section>
 
@@ -380,8 +418,8 @@ function HomePage({
           <SectionTitle title="استكشف الموضوعات" />
           <div className="flex flex-wrap gap-2">
             {tags.map((tag) => (
-              <button key={tag.name} type="button" onClick={() => onNavigate(`/topics/${encodeURIComponent(tag.name)}`)} className="rounded-full bg-white px-3 py-2 text-sm border border-[#e6dcc8]">
-                {tag.name} <span className="text-stone-400">{tag.count}</span>
+              <button key={tag.name} type="button" onClick={() => onNavigate(`/topics/${encodeURIComponent(tag.name)}`)} className="pub-chip rounded-full px-3 py-2 text-sm">
+                {tag.name} <span className="pub-gold">{tag.count}</span>
               </button>
             ))}
           </div>
@@ -405,13 +443,23 @@ function HomePage({
   );
 }
 
+function NumberJump({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [number, setNumber] = useState("");
+  return (
+    <form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); if (number.trim()) onNavigate(`/fatwa/${encodeURIComponent(number.trim())}`); }}>
+      <input value={number} onChange={(event) => setNumber(event.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" placeholder="اذهب إلى فتوى رقم..." className="pub-input min-h-11 flex-1 rounded-2xl px-4 text-sm outline-none" />
+      <button type="submit" className="pub-chip min-h-11 rounded-2xl px-4 text-sm">انتقال</button>
+    </form>
+  );
+}
+
 function SearchBox({ onSubmit, initial = "" }: { onSubmit: (value: string) => void; initial?: string }) {
   const [value, setValue] = useState(initial);
   return (
-    <form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); onSubmit(value.trim()); }}>
+    <form className="mt-5 flex gap-2" onSubmit={(event) => { event.preventDefault(); onSubmit(value.trim()); }}>
       <label className="sr-only" htmlFor="public-search">ابحث في الفتاوى</label>
-      <input id="public-search" value={value} onChange={(event) => setValue(event.target.value)} placeholder="اكتب سؤالك هنا، وسنبحث لك عن أقرب الفتاوى..." className="min-h-12 flex-1 rounded-2xl border border-[#e6dcc8] bg-[#fbf7f0] px-4 text-base outline-none focus:border-[#0c392c]" />
-      <button type="submit" className="min-h-12 min-w-12 rounded-2xl bg-[#0c392c] px-4 text-white" aria-label="بحث"><Search className="h-5 w-5" /></button>
+      <input id="public-search" value={value} onChange={(event) => setValue(event.target.value)} placeholder="اكتب سؤالك هنا، وسنبحث لك عن أقرب الفتاوى..." className="pub-input min-h-14 flex-1 rounded-2xl px-4 text-base outline-none" />
+      <button type="submit" className="pub-solid min-h-14 min-w-14 rounded-2xl px-4" aria-label="بحث"><Search className="h-5 w-5" /></button>
     </form>
   );
 }
@@ -457,23 +505,23 @@ function SearchPage({
 
   return (
     <div className="space-y-4">
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">البحث في الفتاوى</h1>
+      <h1 className="font-cairo text-2xl font-bold pub-brand">البحث في الفتاوى</h1>
       <SearchBox initial={query} onSubmit={(value) => { setQuery(value); onNavigate(`/search?q=${encodeURIComponent(value)}`); }} />
       <div className="flex gap-2">
-        <button type="button" onClick={() => setFiltersOpen(true)} className="rounded-full border border-[#e6dcc8] bg-white px-3 py-2 text-sm">تصفية</button>
-        {category && <span className="rounded-full bg-white px-3 py-2 text-sm">{category}</span>}
+        <button type="button" onClick={() => setFiltersOpen(true)} className="pub-chip rounded-full px-3 py-2 text-sm">تصفية</button>
+        {category && <span className="pub-wash rounded-full px-3 py-2 text-sm">{category}</span>}
       </div>
       {!debounced && (
         <div className="space-y-3">
-          <p className="text-sm text-stone-600">جرّب موضوعاً، أو ارجع إلى بحث سابق.</p>
+          <p className="pub-muted text-sm">جرّب موضوعاً، أو ارجع إلى بحث سابق.</p>
           <div className="flex flex-wrap gap-2">
             {history.map((item) => (
-              <button key={item} type="button" className="rounded-full bg-white px-3 py-2 text-sm border border-[#e6dcc8]" onClick={() => { setQuery(item); onNavigate(`/search?q=${encodeURIComponent(item)}`); }}>{item}</button>
+              <button key={item} type="button" className="pub-chip rounded-full px-3 py-2 text-sm" onClick={() => { setQuery(item); onNavigate(`/search?q=${encodeURIComponent(item)}`); }}>{item}</button>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">
             {categories.slice(0, 4).map((item) => (
-              <button key={item.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(item.name)}`)} className="rounded-2xl border border-[#e6dcc8] bg-white p-3 text-right">{item.name}</button>
+              <button key={item.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(item.name)}`)} className="pub-card rounded-2xl p-3 text-right">{item.name}</button>
             ))}
           </div>
         </div>
@@ -481,16 +529,16 @@ function SearchPage({
       {debounced && filtered.length === 0 && (
         <Empty text="لم نعثر على فتوى منشورة قريبة بما يكفي من سؤالك.">
           <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <button type="button" className="rounded-full bg-white px-3 py-2 text-sm" onClick={() => onNavigate("/categories")}>استكشاف التصنيفات</button>
-            <button type="button" className="rounded-full bg-white px-3 py-2 text-sm" onClick={() => onNavigate("/latest")}>أحدث الفتاوى</button>
-            <button type="button" className="rounded-full bg-white px-3 py-2 text-sm" onClick={() => onNavigate("/report")}>طلب مراجعة</button>
+            <button type="button" className="pub-chip rounded-full px-3 py-2 text-sm" onClick={() => onNavigate("/categories")}>استكشاف التصنيفات</button>
+            <button type="button" className="pub-chip rounded-full px-3 py-2 text-sm" onClick={() => onNavigate("/latest")}>أحدث الفتاوى</button>
+            <button type="button" className="pub-chip rounded-full px-3 py-2 text-sm" onClick={() => onNavigate("/report")}>طلب مراجعة</button>
           </div>
         </Empty>
       )}
       {closest.length > 0 && (
         <section className="space-y-3">
           <h2 className="font-bold">الأقرب لسؤالك</h2>
-          <p className="text-sm text-stone-500">{filtered.length} نتيجة من الفتاوى المعتمدة</p>
+          <p className="pub-muted text-sm">{filtered.length} نتيجة من الفتاوى المعتمدة</p>
           {closest.map((hit) => <FatwaCard key={hit.fatwa.id} fatwa={hit.fatwa} saved={saved.includes(hit.fatwa.id)} onOpen={onOpen} onSave={onSave} note={hit.reason} />)}
         </section>
       )}
@@ -502,14 +550,14 @@ function SearchPage({
       )}
       {filtersOpen && (
         <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setFiltersOpen(false)}>
-          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-[#fbf7f0] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(event) => event.stopPropagation()}>
+          <div className="pub-bg-2 absolute inset-x-0 bottom-0 rounded-t-3xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(event) => event.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between"><strong>تصفية النتائج</strong><button type="button" onClick={() => setFiltersOpen(false)}>إغلاق</button></div>
-            <label className="mb-3 flex items-center justify-between rounded-xl bg-white px-3 py-3"><span>بتسجيل صوتي فقط</span><input type="checkbox" checked={audioOnly} onChange={(event) => setAudioOnly(event.target.checked)} /></label>
-            <label className="mb-3 flex items-center justify-between rounded-xl bg-white px-3 py-3"><span>المحفوظة فقط</span><input type="checkbox" checked={savedOnly} onChange={(event) => setSavedOnly(event.target.checked)} /></label>
+            <label className="pub-surface mb-3 flex items-center justify-between rounded-xl px-3 py-3"><span>بتسجيل صوتي فقط</span><input type="checkbox" checked={audioOnly} onChange={(event) => setAudioOnly(event.target.checked)} /></label>
+            <label className="pub-surface mb-3 flex items-center justify-between rounded-xl px-3 py-3"><span>المحفوظة فقط</span><input type="checkbox" checked={savedOnly} onChange={(event) => setSavedOnly(event.target.checked)} /></label>
             <div className="flex max-h-48 flex-wrap gap-2 overflow-auto">
-              <button type="button" onClick={() => setCategory("")} className={`rounded-full px-3 py-2 text-sm ${category === "" ? "bg-[#0c392c] text-white" : "bg-white"}`}>كل التصنيفات</button>
+              <button type="button" onClick={() => setCategory("")} className={`rounded-full px-3 py-2 text-sm ${category === "" ? "pub-solid" : "pub-chip"}`}>كل التصنيفات</button>
               {categories.map((item) => (
-                <button key={item.name} type="button" onClick={() => setCategory(item.name)} className={`rounded-full px-3 py-2 text-sm ${category === item.name ? "bg-[#0c392c] text-white" : "bg-white"}`}>{item.name}</button>
+                <button key={item.name} type="button" onClick={() => setCategory(item.name)} className={`rounded-full px-3 py-2 text-sm ${category === item.name ? "pub-solid" : "pub-chip"}`}>{item.name}</button>
               ))}
             </div>
           </div>
@@ -561,30 +609,30 @@ function FatwaPage({
   };
   return (
     <article className={`mx-auto space-y-5 ${prefs.width === "narrow" ? "max-w-2xl" : "max-w-3xl"}`} style={{ fontSize: `${prefs.fontScale}rem`, lineHeight: prefs.lineHeight }}>
-      <p className="text-sm text-stone-500">الفتاوى / {fatwa.category || "عام"}</p>
+      <p className="pub-muted text-sm">الفتاوى / {fatwa.category || "عام"}</p>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-[#0c392c] px-3 py-1 text-xs text-white">فتوى رقم {fatwa.fatwaNumber}</span>
-        {fatwa.category && <span className="rounded-full bg-white px-3 py-1 text-xs">{fatwa.category}</span>}
-        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-900">{fatwa.status === "منشورة" ? "فتوى منشورة" : "موثقة في الأرشيف"}</span>
+        <span className="pub-solid rounded-full px-3 py-1 text-xs">فتوى رقم {fatwa.fatwaNumber}</span>
+        {fatwa.category && <span className="pub-chip rounded-full px-3 py-1 text-xs">{fatwa.category}</span>}
+        <span className="pub-wash rounded-full px-3 py-1 text-xs">{fatwa.status === "منشورة" ? "فتوى منشورة" : "موثقة في الأرشيف"}</span>
       </div>
-      <section className="rounded-3xl bg-[#f3ead8] p-4 sm:p-6">
-        <h1 className="font-cairo text-xl font-bold sm:text-2xl">السؤال</h1>
-        <p className="mt-3 font-amiri text-[1.15em]">{question}</p>
+      <section className="pub-question rounded-3xl p-4 sm:p-7">
+        <h1 className="font-cairo text-sm font-bold">السؤال</h1>
+        <p className="mt-3 font-amiri text-[1.35rem] leading-[2.05]">{question}</p>
       </section>
-      <section className="rounded-3xl bg-white p-4 sm:p-6 border border-[#e6dcc8]">
-        <h2 className="font-cairo text-xl font-bold">الجواب</h2>
-        <p className="mt-3 whitespace-pre-wrap font-amiri text-[1.15em]">{answer || "نص الجواب غير متوفر في النسخة العامة."}</p>
-        {fatwa.has_wallahu_aalam && <p className="mt-6 text-center font-amiri text-lg text-[#0c392c]">والله تعالى أعلم</p>}
+      <section className="pub-answer rounded-3xl p-4 sm:p-7">
+        <h2 className="font-cairo text-sm font-bold">الجواب</h2>
+        <p className="mt-3 whitespace-pre-wrap font-amiri text-[1.35rem] leading-[2.15]">{answer || "نص الجواب غير متوفر في النسخة العامة."}</p>
+        {fatwa.has_wallahu_aalam && <p className="pub-brand mt-8 text-center font-amiri text-xl">والله تعالى أعلم</p>}
       </section>
       <AudioBlock fatwa={fatwa} onReport={() => onNavigate(`/report?fatwa=${encodeURIComponent(fatwa.id)}`)} />
       <div className="grid grid-cols-2 gap-2 sm:flex">
-        <button type="button" className="min-h-11 rounded-xl bg-[#0c392c] px-3 text-sm text-white" onClick={() => onSave(fatwa.id)}>{saved.includes(fatwa.id) ? "محفوظة" : "حفظ"}</button>
-        <button type="button" className="min-h-11 rounded-xl bg-white px-3 text-sm" onClick={share}><Share2 className="inline h-4 w-4" /> مشاركة</button>
-        <button type="button" className="min-h-11 rounded-xl bg-white px-3 text-sm" onClick={() => copy(answer, "تم نسخ الجواب")}>نسخ الجواب</button>
-        <button type="button" className="min-h-11 rounded-xl bg-white px-3 text-sm" onClick={() => copy(`السؤال: ${question}\n\nالجواب: ${answer}`, "تم نسخ السؤال والجواب")}>نسخ السؤال والجواب</button>
+        <button type="button" className="pub-solid min-h-11 rounded-xl px-3 text-sm" onClick={() => onSave(fatwa.id)}>{saved.includes(fatwa.id) ? "محفوظة" : "حفظ"}</button>
+        <button type="button" className="pub-chip min-h-11 rounded-xl px-3 text-sm" onClick={share}><Share2 className="inline h-4 w-4" /> مشاركة</button>
+        <button type="button" className="pub-chip min-h-11 rounded-xl px-3 text-sm" onClick={() => copy(answer, "تم نسخ الجواب")}>نسخ الجواب</button>
+        <button type="button" className="pub-chip min-h-11 rounded-xl px-3 text-sm" onClick={() => copy(`السؤال: ${question}\n\nالجواب: ${answer}`, "تم نسخ السؤال والجواب")}>نسخ السؤال والجواب</button>
       </div>
-      <p className="text-xs text-stone-500">رقم الفتوى {fatwa.fatwaNumber}{fatwa.created_at ? ` · أُضيفت ${fatwa.created_at.slice(0, 10)}` : ""}{fatwa.audio_file?.name ? " · التسجيل الصوتي متوفر" : ""}</p>
-      <button type="button" className="text-sm text-[#8a6a32]" onClick={() => onNavigate(`/report?fatwa=${encodeURIComponent(fatwa.id)}`)}>الإبلاغ عن خلل</button>
+      <p className="pub-muted text-xs">رقم الفتوى {fatwa.fatwaNumber}{fatwa.created_at ? ` · أُضيفت ${fatwa.created_at.slice(0, 10)}` : ""}{fatwa.audio_file?.name ? " · التسجيل الصوتي متوفر" : ""}</p>
+      <button type="button" className="pub-gold text-sm" onClick={() => onNavigate(`/report?fatwa=${encodeURIComponent(fatwa.id)}`)}>هل وجدت خللاً؟ الإبلاغ عن خلل</button>
       {related.length > 0 && (
         <section className="space-y-3">
           <h2 className="font-bold">فتاوى ذات صلة</h2>
@@ -601,19 +649,19 @@ function AudioBlock({ fatwa, onReport }: { fatwa: Fatwa; onReport: () => void })
   if (!fatwa.audio_file?.name) return null;
   if (!src) {
     return (
-      <div className="rounded-2xl border border-[#e6dcc8] bg-white p-4 text-sm">
+      <div className="pub-card rounded-2xl p-4 text-sm">
         <p>التسجيل غير متاح حالياً في النسخة العامة.</p>
-        <button type="button" className="mt-2 text-[#8a6a32]" onClick={onReport}>الإبلاغ عن المشكلة</button>
+        <button type="button" className="pub-gold mt-2" onClick={onReport}>الإبلاغ عن المشكلة</button>
       </div>
     );
   }
   return (
-    <div className="rounded-2xl border border-[#e6dcc8] bg-white p-4">
+    <div className="pub-card rounded-2xl p-4">
       <div className="mb-2 flex items-center gap-2 font-bold"><Volume2 className="h-4 w-4" /> الاستماع إلى التسجيل</div>
       <audio controls preload="none" src={src} className="w-full" onPlay={(event) => { event.currentTarget.playbackRate = rate; }} />
       <div className="mt-2 flex flex-wrap gap-2">
         {[0.75, 1, 1.25, 1.5, 2].map((value) => (
-          <button key={value} type="button" onClick={(event) => { setRate(value); const audio = event.currentTarget.parentElement?.parentElement?.querySelector("audio"); if (audio) audio.playbackRate = value; }} className={`min-h-11 rounded-full px-3 text-sm ${rate === value ? "bg-[#0c392c] text-white" : "bg-[#f6f1e7]"}`}>{value}x</button>
+          <button key={value} type="button" onClick={(event) => { setRate(value); const audio = event.currentTarget.parentElement?.parentElement?.querySelector("audio"); if (audio) audio.playbackRate = value; }} className={`min-h-11 rounded-full px-3 text-sm ${rate === value ? "pub-solid" : "pub-chip"}`}>{value}x</button>
         ))}
       </div>
     </div>
@@ -636,19 +684,21 @@ function FatwaCard({
   const [flipped, setFlipped] = useState(false);
   const question = publicQuestion(fatwa);
   return (
-    <article className="pub-card rounded-2xl border border-[#e6dcc8] bg-white p-4">
+    <article className="pub-card rounded-3xl p-4">
       <button type="button" className="w-full text-right" onClick={() => setFlipped((value) => !value)}>
-        <div className="mb-2 flex items-center gap-2 text-xs text-stone-500">
-          <span>فتوى {fatwa.fatwaNumber}</span>
+        <div className="pub-muted mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="pub-gold">فتوى {fatwa.fatwaNumber}</span>
           {fatwa.category && <span>{fatwa.category}</span>}
+          {fatwa.created_at && <span>{fatwa.created_at.slice(0, 10)}</span>}
           {fatwa.audio_file?.name && <Volume2 className="h-3.5 w-3.5" />}
-          {note && <span className="rounded-full bg-[#f3ead8] px-2 py-0.5">{note}</span>}
+          {note && <span className="pub-wash rounded-full px-2 py-0.5">{note}</span>}
         </div>
-        <h3 className="font-cairo text-base font-bold leading-7">{snippet(flipped ? publicAnswer(fatwa) : question, 160)}</h3>
+        <h3 className="font-cairo text-base font-bold leading-8">{snippet(question, 140)}</h3>
+        <p className="pub-muted mt-2 text-sm leading-7">{snippet(publicAnswer(fatwa), flipped ? 280 : 90)}</p>
       </button>
-      <div className="mt-3 flex gap-2">
-        <button type="button" className="min-h-11 flex-1 rounded-xl bg-[#0c392c] text-sm text-white" onClick={() => onOpen(fatwa)}>عرض الفتوى</button>
-        <button type="button" className="min-h-11 rounded-xl border border-[#e6dcc8] px-3 text-sm" onClick={() => onSave(fatwa.id)} aria-label={saved ? "إزالة من المحفوظة" : "حفظ"}>{saved ? "محفوظة" : "حفظ"}</button>
+      <div className="mt-4 flex gap-2">
+        <button type="button" className="pub-solid min-h-11 flex-1 rounded-xl text-sm" onClick={() => onOpen(fatwa)}>عرض الفتوى</button>
+        <button type="button" className="pub-chip min-h-11 rounded-xl px-3 text-sm" onClick={() => onSave(fatwa.id)} aria-label={saved ? "إزالة من المحفوظة" : "حفظ"}>{saved ? "محفوظة" : "حفظ"}</button>
       </div>
     </article>
   );
@@ -659,14 +709,14 @@ function CategoriesPage({ published, onNavigate }: { published: Fatwa[]; onNavig
   const tags = topTags(published, 16);
   return (
     <div className="space-y-6">
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">التصنيفات</h1>
+      <h1 className="font-cairo text-2xl font-bold pub-brand">التصنيفات</h1>
       {categories.length === 0 ? <Empty text="لا توجد تصنيفات في الفتاوى المعتمدة." /> : (
         <div className="grid grid-cols-2 gap-3">
           {categories.map((category) => (
-            <button key={category.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(category.name)}`)} className="min-h-32 rounded-2xl border border-[#e6dcc8] bg-white p-3 text-right">
-              <span className="block font-bold">{category.name}</span>
-              <span className="mt-1 block text-xs text-stone-500">{category.count} فتوى</span>
-              <span className="mt-2 block text-xs leading-5 text-stone-600">{snippet(category.sample, 70)}</span>
+            <button key={category.name} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(category.name)}`)} className="pub-card min-h-32 rounded-2xl p-4 text-right">
+              <span className="block font-cairo font-bold">{category.name}</span>
+              <span className="pub-gold mt-1 block text-xs">{category.count} فتوى</span>
+              <span className="pub-muted mt-2 block text-xs leading-5">{snippet(category.sample, 70)}</span>
             </button>
           ))}
         </div>
@@ -675,7 +725,7 @@ function CategoriesPage({ published, onNavigate }: { published: Fatwa[]; onNavig
         <section>
           <h2 className="mb-3 font-bold">الموضوعات</h2>
           <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => <button key={tag.name} type="button" onClick={() => onNavigate(`/topics/${encodeURIComponent(tag.name)}`)} className="rounded-full bg-white px-3 py-2 text-sm border border-[#e6dcc8]">{tag.name}</button>)}
+            {tags.map((tag) => <button key={tag.name} type="button" onClick={() => onNavigate(`/topics/${encodeURIComponent(tag.name)}`)} className="pub-chip rounded-full px-3 py-2 text-sm">{tag.name}</button>)}
           </div>
         </section>
       )}
@@ -700,8 +750,8 @@ function ListPage({
 }) {
   return (
     <div className="space-y-4">
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">{title}</h1>
-      <p className="text-sm text-stone-500">{fatwas.length} فتوى</p>
+      <h1 className="font-cairo text-2xl font-bold pub-brand">{title}</h1>
+      <p className="pub-muted text-sm">{fatwas.length} فتوى</p>
       {fatwas.length === 0 ? <Empty text={empty} /> : fatwas.map((fatwa) => <FatwaCard key={fatwa.id} fatwa={fatwa} saved={saved.includes(fatwa.id)} onOpen={onOpen} onSave={onSave} />)}
     </div>
   );
@@ -709,8 +759,8 @@ function ListPage({
 
 function AboutPage() {
   return (
-    <article className="space-y-4 rounded-3xl bg-white p-5 border border-[#e6dcc8]">
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">عن المنصة</h1>
+    <article className="pub-card space-y-4 rounded-3xl p-5">
+      <h1 className="font-cairo text-2xl font-bold pub-brand">عن المنصة</h1>
       <p className="leading-8">هذه منصة لقراءة فتاوى فضيلة الشيخ الدكتور عبد الباري خلة بعد اعتمادها في الأرشيف. البحث يعثر على الفتوى الأقرب، ولا يصدر حكماً جديداً.</p>
       <p className="leading-8">ما يراه القارئ هو السؤال والجواب المعتمدان. مسودات التفريغ وملاحظات التحرير تبقى داخل غرفة التحرير.</p>
     </article>
@@ -731,31 +781,31 @@ function ReportPage({ published, presetId, onDone }: { published: Fatwa[]; prese
       setSent(true);
       onDone(navigator.onLine ? "تم حفظ البلاغ على هذا الجهاز." : "تم حفظ البلاغ وسيبقى على الجهاز حتى تتوفر مزامنة للبلاغات.");
     }}>
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">الإبلاغ عن خلل</h1>
-      <p className="text-sm text-stone-600">البلاغ لا يعدّل الفتوى. يراجعه المحرر لاحقاً.</p>
-      {fatwa && <p className="rounded-2xl bg-white p-3 text-sm">فتوى رقم {fatwa.fatwaNumber}: {snippet(publicQuestion(fatwa), 90)}</p>}
+      <h1 className="font-cairo text-2xl font-bold pub-brand">الإبلاغ عن خلل</h1>
+      <p className="pub-muted text-sm">البلاغ لا يعدّل الفتوى. يراجعه المحرر لاحقاً.</p>
+      {fatwa && <p className="pub-wash rounded-2xl p-3 text-sm">فتوى رقم {fatwa.fatwaNumber}: {snippet(publicQuestion(fatwa), 90)}</p>}
       <label className="block text-sm font-bold">نوع الخلل
-        <select value={type} onChange={(event) => setType(event.target.value)} className="mt-1 min-h-12 w-full rounded-xl border border-[#e6dcc8] bg-white px-3">
+        <select value={type} onChange={(event) => setType(event.target.value)} className="pub-input mt-1 min-h-12 w-full rounded-xl px-3">
           {REPORT_TYPES.map((item) => <option key={item}>{item}</option>)}
         </select>
       </label>
       <label className="block text-sm font-bold">التفاصيل
-        <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={5} className="mt-1 w-full rounded-xl border border-[#e6dcc8] bg-white p-3" />
+        <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={5} className="pub-input mt-1 w-full rounded-xl p-3" />
       </label>
-      <button type="submit" className="min-h-12 rounded-xl bg-[#0c392c] px-4 text-white" disabled={sent}>{sent ? "تم الحفظ" : "إرسال البلاغ"}</button>
+      <button type="submit" className="pub-solid min-h-12 rounded-xl px-4" disabled={sent}>{sent ? "تم الحفظ" : "إرسال البلاغ"}</button>
     </form>
   );
 }
 
 function OfflinePage({ published, savedCount, online, onNavigate }: { published: Fatwa[]; savedCount: number; online: boolean; onNavigate: (path: string) => void }) {
   return (
-    <div className="space-y-4 rounded-3xl bg-white p-5 border border-[#e6dcc8]">
+    <div className="pub-card space-y-4 rounded-3xl p-5">
       <h1 className="font-cairo text-2xl font-bold">{online ? "الاتصال متاح" : "أنت بدون اتصال"}</h1>
       <p className="leading-8">{online ? "يمكن تحديث الأرشيف من الخادم. القراءة والحفظ يعملان محلياً أيضاً." : "يمكنك متابعة الفتاوى المحفوظة وما تم تحميله سابقاً على هذا الجهاز."}</p>
-      <p className="text-sm text-stone-500">{published.length} فتوى متاحة محلياً · {savedCount} محفوظة</p>
+      <p className="pub-muted text-sm">{published.length} فتوى متاحة محلياً · {savedCount} محفوظة</p>
       <div className="flex gap-2">
-        <button type="button" className="min-h-11 rounded-xl bg-[#0c392c] px-4 text-white" onClick={() => onNavigate("/saved")}>المحفوظة</button>
-        <button type="button" className="min-h-11 rounded-xl bg-[#f6f1e7] px-4" onClick={() => window.location.reload()}>إعادة المحاولة</button>
+        <button type="button" className="pub-solid min-h-11 rounded-xl px-4" onClick={() => onNavigate("/saved")}>المحفوظة</button>
+        <button type="button" className="pub-chip min-h-11 rounded-xl px-4" onClick={() => window.location.reload()}>إعادة المحاولة</button>
       </div>
     </div>
   );
@@ -780,20 +830,20 @@ function SettingsPage({
 }) {
   return (
     <div className="space-y-4">
-      <h1 className="font-cairo text-2xl font-bold text-[#0c392c]">إعدادات القراءة</h1>
-      <label className="block rounded-2xl bg-white p-4">حجم الخط
+      <h1 className="font-cairo text-2xl font-bold pub-brand">إعدادات القراءة</h1>
+      <label className="pub-card block rounded-2xl p-4">حجم الخط
         <input type="range" min={0.9} max={1.35} step={0.05} value={prefs.fontScale} onChange={(event) => onChange({ ...prefs, fontScale: Number(event.target.value) })} className="mt-3 w-full" />
       </label>
-      <label className="block rounded-2xl bg-white p-4">تباعد الأسطر
+      <label className="pub-card block rounded-2xl p-4">تباعد الأسطر
         <input type="range" min={1.6} max={2.3} step={0.1} value={prefs.lineHeight} onChange={(event) => onChange({ ...prefs, lineHeight: Number(event.target.value) })} className="mt-3 w-full" />
       </label>
       <div className="grid grid-cols-3 gap-2">
         {(["light", "dark", "system"] as const).map((theme) => (
-          <button key={theme} type="button" onClick={() => onChange({ ...prefs, theme })} className={`min-h-11 rounded-xl ${prefs.theme === theme ? "bg-[#0c392c] text-white" : "bg-white"}`}>{theme === "light" ? "فاتح" : theme === "dark" ? "داكن" : "النظام"}</button>
+          <button key={theme} type="button" onClick={() => onChange({ ...prefs, theme })} className={`min-h-11 rounded-xl ${prefs.theme === theme ? "pub-solid" : "pub-chip"}`}>{theme === "light" ? "فاتح" : theme === "dark" ? "داكن" : "النظام"}</button>
         ))}
       </div>
-      <button type="button" className="min-h-11 w-full rounded-xl bg-white" onClick={() => onChange({ ...prefs, width: prefs.width === "narrow" ? "normal" : "narrow" })}>عرض القراءة: {prefs.width === "narrow" ? "ضيق" : "معتدل"}</button>
-      <section className="rounded-2xl bg-white p-4 text-sm">
+      <button type="button" className="pub-chip min-h-11 w-full rounded-xl" onClick={() => onChange({ ...prefs, width: prefs.width === "narrow" ? "normal" : "narrow" })}>عرض القراءة: {prefs.width === "narrow" ? "ضيق" : "معتدل"}</button>
+      <section className="pub-card rounded-2xl p-4 text-sm">
         <h2 className="mb-2 font-bold">المحتوى المخزن على الجهاز</h2>
         <p>المحفوظة: {savedCount}</p>
         <p>آخر ما قرأت: {recentCount}</p>
@@ -811,13 +861,13 @@ function SectionTitle({ title, action, onAction }: { title: string; action?: str
   return (
     <div className="mb-3 flex items-center justify-between">
       <h2 className="font-cairo text-lg font-bold">{title}</h2>
-      {action && onAction && <button type="button" onClick={onAction} className="text-sm text-[#0c392c]">{action}</button>}
+      {action && onAction && <button type="button" onClick={onAction} className="text-sm pub-brand">{action}</button>}
     </div>
   );
 }
 
 function Empty({ text, children }: { text: string; children?: React.ReactNode }) {
-  return <div className="rounded-3xl border border-dashed border-[#e6dcc8] bg-white/70 px-4 py-8 text-center text-sm leading-7 text-stone-600">{text}{children}</div>;
+  return <div className="pub-card rounded-3xl border-dashed px-4 py-8 text-center text-sm leading-7">{text}{children}</div>;
 }
 
 export function AdminReportsPanel() {
