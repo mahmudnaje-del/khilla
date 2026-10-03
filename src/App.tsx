@@ -18,6 +18,8 @@ import { AuthModal } from "./components/AuthModal";
 import { InstallPromptModal } from "./components/InstallPromptModal";
 import { ToastContainer, ToastMessage } from "./components/Toast";
 import { ArabicFatwaDetailsModal } from "./components/ArabicFatwaDetailsModal";
+import { PublicPlatform, AdminReportsPanel, AdminSyncPanel } from "./public/PublicPlatform";
+import { adminDestination, ensureShareLandsInAdmin, isAdminPath, isShareLaunch, pathForTab } from "./public/routes";
 import { Fatwa, FatwaStatus, CardTemplateSettings, SyncStatus } from "./types";
 import {
   syncApprovedFatwa,
@@ -57,21 +59,19 @@ import {
 } from "./lib/firebase";
 
 export default function App() {
+  ensureShareLandsInAdmin();
+  const [href, setHref] = useState(() =>
+    typeof window === "undefined" ? "/" : window.location.pathname + window.location.search
+  );
+  const pathOnly = href.split("?")[0] || "/";
+  const adminMode = isAdminPath(pathOnly) || isShareLaunch(href.includes("?") ? href.slice(href.indexOf("?")) : "");
+  const adminTarget = adminDestination(pathOnly);
+
   const [activeTab, setActiveTab] = useState<
     "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin"
   >(() => {
-    if (typeof window !== "undefined") {
-      const p = window.location.pathname;
-      const h = window.location.hash;
-      const s = new URLSearchParams(window.location.search);
-      if (s.get("shared") || s.get("id")) {
-        return "transcribe";
-      }
-      if (p === "/admin" || p.startsWith("/admin") || h === "#admin" || s.get("tab") === "admin") {
-        return "admin";
-      }
-    }
-    return "transcribe";
+    if (!adminMode) return "stats";
+    return adminTarget === "reports" || adminTarget === "sync" ? "stats" : adminTarget;
   });
 
   const [fatwas, setFatwas] = useState<Fatwa[]>(() => loadFatwasFromStorage());
@@ -90,42 +90,21 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [detailsModalFatwa, setDetailsModalFatwa] = useState<Fatwa | null>(null);
 
-  // Listen to popstate or hash for direct /admin routing and /?shared routing
   useEffect(() => {
-    const checkUrlRoute = () => {
-      const path = window.location.pathname;
-      const hash = window.location.hash;
-      const search = new URLSearchParams(window.location.search);
-      if (search.get("shared") || search.get("id")) {
-        setActiveTab("transcribe");
-        return;
-      }
-      if (path === "/admin" || path.startsWith("/admin") || hash === "#admin" || search.get("tab") === "admin") {
-        setActiveTab("admin");
-      }
-    };
-    window.addEventListener("popstate", checkUrlRoute);
-    window.addEventListener("hashchange", checkUrlRoute);
+    const sync = () => setHref(window.location.pathname + window.location.search);
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
     return () => {
-      window.removeEventListener("popstate", checkUrlRoute);
-      window.removeEventListener("hashchange", checkUrlRoute);
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
     };
   }, []);
 
-  // Synchronize browser URL bar with activeTab for /admin
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      if (activeTab === "admin") {
-        if (window.location.pathname !== "/admin" && !window.location.hash.includes("admin")) {
-          window.history.pushState(null, "", "/admin");
-        }
-      } else {
-        if (window.location.pathname === "/admin") {
-          window.history.pushState(null, "", "/");
-        }
-      }
-    }
-  }, [activeTab]);
+    if (!adminMode) return;
+    if (adminTarget === "reports" || adminTarget === "sync") return;
+    setActiveTab(adminTarget);
+  }, [adminMode, adminTarget]);
 
   // Real-time Cloud Firestore synchronization & initial seeding
   useEffect(() => {
@@ -896,12 +875,32 @@ export default function App() {
       }
     }
     setActiveTab(tab);
+    const next = pathForTab(tab);
+    if (window.location.pathname !== next) {
+      window.history.pushState(null, "", next);
+      setHref(next);
+    }
   };
 
   const showDiagnostics = new URLSearchParams(window.location.search).get("diag") === "1";
 
   if (showDiagnostics) {
     return <PWADiagnostics />;
+  }
+
+  if (!adminMode) {
+    return (
+      <>
+        <PublicPlatform
+          fatwas={fatwas}
+          onOpenAdmin={() => {
+            window.history.pushState(null, "", "/admin");
+            setHref("/admin");
+          }}
+        />
+        <InstallPromptModal isOpen={isInstallModalOpen} onClose={() => setIsInstallModalOpen(false)} />
+      </>
+    );
   }
 
   return (
@@ -928,7 +927,11 @@ export default function App() {
       {/* Main Content Area with desktop right margin for sidebar */}
       <div className="flex-1 flex flex-col lg:mr-64 xl:mr-72 min-h-screen">
         <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-8">
-          {/* Dynamic Tab Content with smooth Motion Animation */}
+          {adminTarget === "reports" ? (
+            <AdminReportsPanel />
+          ) : adminTarget === "sync" ? (
+            <AdminSyncPanel syncStatus={syncStatus} pendingWrites={pendingWritesCount} />
+          ) : (
           <AnimatePresence mode="wait">
             {activeTab === "transcribe" && (
               <motion.div
@@ -1093,6 +1096,7 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
+          )}
         </main>
 
         {/* Footer */}

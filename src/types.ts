@@ -53,6 +53,8 @@ export interface Fatwa {
   deleted?: boolean;
   deleted_at?: string;
   pendingSync?: boolean;
+  /** فتوى مختارة للصفحة العامة. الحقل اختياري حتى لا تتغير السجلات القديمة. */
+  isFeatured?: boolean;
 }
 
 export type SyncStatus = 'initializing' | 'connecting' | 'synced' | 'offline' | 'error' | 'permission-denied' | 'quota-exceeded';
