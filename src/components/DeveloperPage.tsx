@@ -48,6 +48,7 @@ import { Fatwa } from "../types";
 
 interface DeveloperPageProps {
   onNavigateToTranscribe: () => void;
+  onNavigateToAdmin?: () => void;
   onRunFullSyncCampaign?: () => Promise<void>;
   showToast?: (msg: string, type?: "success" | "error" | "info") => void;
   fatwas?: Fatwa[];
@@ -62,6 +63,7 @@ interface CampaignStep {
 
 export const DeveloperPage: React.FC<DeveloperPageProps> = ({
   onNavigateToTranscribe,
+  onNavigateToAdmin,
   onRunFullSyncCampaign,
   showToast,
   fatwas = [],
@@ -309,14 +311,28 @@ export const DeveloperPage: React.FC<DeveloperPageProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={handleLaunchFullCampaign}
-            disabled={isCampaignRunning}
-            className="w-full md:w-auto px-5 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-98 text-stone-950 font-bold font-cairo text-sm shadow-md transition-all flex items-center justify-center gap-2.5 shrink-0 disabled:opacity-60 cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${isCampaignRunning ? "animate-spin text-stone-900" : ""}`} />
-            <span>{isCampaignRunning ? "جارٍ إطلاق الحملة والفحص..." : "🚀 إطلاق حملة التحسينات والمزامنة الآن"}</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full md:w-auto">
+            {onNavigateToAdmin && (
+              <button
+                type="button"
+                onClick={onNavigateToAdmin}
+                className="w-full sm:w-auto px-5 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white font-bold font-cairo text-sm shadow-md transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer border border-emerald-400/40"
+                title="الانتقال إلى لوحة الإدارة لإعادة ترقيم الفتاوى وتصحيح الأخطاء"
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-300" />
+                <span>لوحة تصحيح الأرقام والأخطاء (Admin)</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleLaunchFullCampaign}
+              disabled={isCampaignRunning}
+              className="w-full sm:w-auto px-5 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 active:scale-98 text-stone-950 font-bold font-cairo text-sm shadow-md transition-all flex items-center justify-center gap-2.5 shrink-0 disabled:opacity-60 cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${isCampaignRunning ? "animate-spin text-stone-900" : ""}`} />
+              <span>{isCampaignRunning ? "جارٍ إطلاق الحملة والفحص..." : "🚀 إطلاق حملة التحسينات والمزامنة الآن"}</span>
+            </button>
+          </div>
         </div>
 
         {/* Campaign Live Progress Box */}

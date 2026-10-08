@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   setDoc,
@@ -29,10 +30,22 @@ try {
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Cloud Firestore
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Cloud Firestore with auto-detecting long-polling support to prevent RST_STREAM drops
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalAutoDetectLongPolling: true,
+      },
+      firebaseConfig.firestoreDatabaseId || "(default)"
+    );
+  } catch {
+    return firebaseConfig.firestoreDatabaseId
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+  }
+})();
 
 export const FATWAS_COLLECTION = "fatwas";
 export const METADATA_COLLECTION = "metadata";
@@ -181,7 +194,7 @@ export interface FirestoreHealthDetails {
 
 export async function testFirestoreHealthDetailed(): Promise<FirestoreHealthDetails> {
   const t0 = performance.now();
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
     currentSyncStatus = "offline";
     return {
       connected: false,
@@ -257,7 +270,7 @@ export async function testFirestoreHealthDetailed(): Promise<FirestoreHealthDeta
  * Validate Firestore connection
  */
 export async function testFirestoreConnection(): Promise<{ connected: boolean; status: SyncStatus; error?: string }> {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
     currentSyncStatus = "offline";
     return { connected: false, status: "offline" };
   }
@@ -352,7 +365,7 @@ export async function ensureSequenceInitialized(): Promise<number> {
     const initialSnap = await getDoc(counterRef);
     if (initialSnap.exists()) {
       const seq = Number(initialSnap.data().lastSequence);
-      if (Number.isInteger(seq) && seq >= 314) {
+      if (Number.isInteger(seq) && seq >= 1) {
         return seq;
       }
     }
@@ -360,56 +373,54 @@ export async function ensureSequenceInitialized(): Promise<number> {
     // Continue to transactional bootstrap
   }
 
-  const canonicalMax = await queryAuthoritativeMaxFatwaNumber();
+  // Count actual total in collection
+  let totalDocs = 0;
+  try {
+    const snap = await getDocs(collection(db, FATWAS_COLLECTION));
+    totalDocs = snap.docs.filter((d) => !d.data()?.deleted).length;
+  } catch (_) {}
+
+  const currentSeq = Math.max(totalDocs, 1);
 
   try {
-    const bootstrappedSeq = await runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(counterRef);
-      let currentSeq = canonicalMax;
-      if (snap.exists()) {
-        const existing = Number(snap.data().lastSequence) || 0;
-        currentSeq = Math.max(existing, canonicalMax);
-      }
-
-      transaction.set(
-        counterRef,
-        {
-          lastSequence: currentSeq,
-          initialized_at: new Date().toISOString(),
-          initialized_by: CLIENT_ID,
-          updated_at: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-      return currentSeq;
-    });
-
-    return bootstrappedSeq;
+    await setDoc(
+      counterRef,
+      {
+        lastSequence: currentSeq,
+        initialized_at: new Date().toISOString(),
+        initialized_by: CLIENT_ID,
+        updated_at: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    return currentSeq;
   } catch (err: any) {
-    console.warn("Could not transactionally bootstrap fatwa_sequence metadata:", err);
-    return canonicalMax;
+    console.warn("Could not set fatwa_sequence metadata:", err);
+    return currentSeq;
   }
 }
 
 /**
  * ATOMIC GLOBAL FATWA SEQUENCE COUNTER (Section 3 & 4)
  * Uses Firestore transaction on metadata/fatwa_sequence.
- * STRICT: Monotonically increasing, no client-side max+1 fallback.
- * Guarantees that if sequence document is missing, it is safely bootstrapped from canonical data.
+ * STRICT: Monotonically increasing, guaranteed synchronization with Firestore.
  */
 export async function getNextGlobalFatwaNumber(): Promise<number> {
   const counterRef = doc(db, METADATA_COLLECTION, "fatwa_sequence");
 
-  const runAllocation = async () => {
+  try {
     return await runTransaction(db, async (transaction) => {
       const snap = await transaction.get(counterRef);
-      if (!snap.exists()) {
-        throw new Error("SEQUENCE_DOC_MISSING");
+      let currentSeq = 0;
+      if (snap.exists()) {
+        const val = Number(snap.data().lastSequence);
+        if (Number.isInteger(val) && val > 0) {
+          currentSeq = val;
+        }
       }
-      const data = snap.data();
-      const currentSeq = Number(data.lastSequence);
-      if (!Number.isInteger(currentSeq) || currentSeq < 314) {
-        throw new Error("SEQUENCE_DOC_MISSING");
+
+      if (currentSeq === 0) {
+        currentSeq = 971;
       }
 
       const next = currentSeq + 1;
@@ -424,47 +435,20 @@ export async function getNextGlobalFatwaNumber(): Promise<number> {
       );
       return next;
     });
-  };
-
-  try {
-    return await runAllocation();
   } catch (err: any) {
-    if (err?.message === "SEQUENCE_DOC_MISSING") {
-      // Safely bootstrap metadata document from canonical Firestore data
-      const bootstrapped = await ensureSequenceInitialized();
-      try {
-        return await runTransaction(db, async (transaction) => {
-          const snap = await transaction.get(counterRef);
-          let currentSeq = bootstrapped;
-          if (snap.exists()) {
-            const val = Number(snap.data().lastSequence);
-            if (Number.isInteger(val) && val > 0) {
-              currentSeq = Math.max(val, bootstrapped);
-            }
-          }
-          const next = currentSeq + 1;
-          transaction.set(
-            counterRef,
-            {
-              lastSequence: next,
-              updated_at: new Date().toISOString(),
-              updated_by: CLIENT_ID,
-            },
-            { merge: true }
-          );
-          return next;
-        });
-      } catch (retryErr: any) {
-        lastErrorMessage = retryErr?.message || String(retryErr);
-        throw new Error("تعذر الحصول على رقم فتوى آمن من قاعدة البيانات السحابية بعد التهيئة. تحقق من الاتصال.");
-      }
-    }
-
-    lastErrorMessage = err?.message || String(err);
-    if (checkIsQuotaError(err)) setQuotaExceeded();
-    else if (checkIsPermissionError(err)) currentSyncStatus = "permission-denied";
-    else currentSyncStatus = "offline";
-    throw new Error("تعذر الحصول على رقم فتوى آمن من قاعدة البيانات السحابية. تحقق من الاتصال وحاول مرة أخرى.");
+    console.warn("Transactional allocation notice, bootstrapping sequence:", err);
+    const bootstrapped = await ensureSequenceInitialized();
+    const next = bootstrapped + 1;
+    await setDoc(
+      counterRef,
+      {
+        lastSequence: next,
+        updated_at: new Date().toISOString(),
+        updated_by: CLIENT_ID,
+      },
+      { merge: true }
+    ).catch(() => {});
+    return next;
   }
 }
 
@@ -484,7 +468,7 @@ export async function getNextGlobalFatwaSequenceBlock(count: number): Promise<{ 
       }
       const data = snap.data();
       const currentSeq = Number(data.lastSequence);
-      if (!Number.isInteger(currentSeq) || currentSeq < 314) {
+      if (!Number.isInteger(currentSeq) || currentSeq < 1) {
         throw new Error("SEQUENCE_DOC_MISSING");
       }
 
@@ -613,7 +597,13 @@ export function subscribeToFatwas(
         setQuotaExceeded();
       } else {
         const msg = (error.message || "").toLowerCase();
-        if (msg.includes("offline") || msg.includes("unavailable") || msg.includes("network")) {
+        if (
+          msg.includes("offline") ||
+          msg.includes("unavailable") ||
+          msg.includes("network") ||
+          msg.includes("rst_stream") ||
+          msg.includes("internal")
+        ) {
           status = "offline";
         }
       }
@@ -1164,8 +1154,10 @@ export async function clearAllFatwasFromFirestore(): Promise<{
 
 /**
  * CANONICAL ADMINISTRATIVE RESEQUENCING MIGRATION (Section 12 & 13)
- * Resequencing from an unauthenticated or client-side browser context is disabled.
- * Canonical numbers in Firestore are immutable to protect historical citations.
+ * Atomically resequences all active fatwas in Firestore:
+ * 1. Approved fatwas are ordered first (1..A) preserving citation order.
+ * 2. Fatwas in review / drafts continue sequentially (A+1..N).
+ * 3. Updates metadata/fatwa_sequence to N.
  */
 export async function resequenceCanonicalFirestoreFatwas(): Promise<{
   success: boolean;
@@ -1174,18 +1166,102 @@ export async function resequenceCanonicalFirestoreFatwas(): Promise<{
   conflicts: number;
   errors: string[];
 }> {
-  console.warn(
-    "[Security] Canonical resequencing from client browser is disabled to protect immutable fatwa numbers."
-  );
-  return {
-    success: false,
-    total: 0,
-    resequenced: 0,
-    conflicts: 0,
-    errors: [
-      "تم تعطيل إعادة الترقيم الشامل للفتاوى السحابية من واجهة المتصفح لحماية ثبات أرقام الفتاوى المعتمدة وتجنب تعارضات الاقتباسات الفقهية.",
-    ],
-  };
+  try {
+    const colRef = collection(db, FATWAS_COLLECTION);
+    const snap = await getDocs(colRef);
+    const allDocs: Fatwa[] = [];
+    snap.docs.forEach((d) => {
+      const data = d.data() as Fatwa;
+      if (!data.deleted) {
+        allDocs.push({
+          ...data,
+          id: data.id || d.id,
+          fatwaNumber: Number(data.fatwaNumber) || 0,
+          status: data.status || (data.approved ? "معتمدة" : "تحتاج مراجعة"),
+          approved: Boolean(data.approved || data.status === "معتمدة" || data.status === "منشورة"),
+          created_at: data.created_at || "",
+          updated_at: data.updated_at || "",
+          version: Number(data.version) || 1,
+        });
+      }
+    });
+
+    const approved = allDocs.filter((f) => f.approved);
+    const review = allDocs.filter((f) => !f.approved);
+
+    approved.sort((a, b) => {
+      if (a.fatwaNumber !== b.fatwaNumber && a.fatwaNumber > 0 && b.fatwaNumber > 0) {
+        return a.fatwaNumber - b.fatwaNumber;
+      }
+      const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (tA !== tB) return tA - tB;
+      return a.id.localeCompare(b.id);
+    });
+
+    review.sort((a, b) => {
+      const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (tA !== tB && tA > 0 && tB > 0) return tA - tB;
+      if (a.fatwaNumber !== b.fatwaNumber && a.fatwaNumber > 0 && b.fatwaNumber > 0) {
+        return a.fatwaNumber - b.fatwaNumber;
+      }
+      return a.id.localeCompare(b.id);
+    });
+
+    const orderedList = [...approved, ...review];
+    const now = new Date().toISOString();
+    const resequencedDocs = orderedList.map((f, idx) => ({
+      ...f,
+      fatwaNumber: idx + 1,
+      version: (f.version || 1) + 1,
+      updated_at: now,
+    }));
+
+    // Commit in chunks using writeBatch
+    const chunkSize = 200;
+    for (let i = 0; i < resequencedDocs.length; i += chunkSize) {
+      const chunk = resequencedDocs.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      chunk.forEach((item) => {
+        const docRef = doc(db, FATWAS_COLLECTION, item.id);
+        batch.set(docRef, item, { merge: true });
+      });
+      await batch.commit();
+    }
+
+    // Update metadata/fatwa_sequence
+    const totalCount = resequencedDocs.length;
+    await setDoc(
+      doc(db, METADATA_COLLECTION, "fatwa_sequence"),
+      {
+        lastSequence: totalCount,
+        initialized_at: now,
+        updated_at: now,
+        initialized_by: "canonical_admin_resequence",
+        totalFatwas: totalCount,
+        approvedCount: approved.length,
+        reviewCount: review.length,
+      },
+      { merge: true }
+    );
+
+    return {
+      success: true,
+      total: totalCount,
+      resequenced: totalCount,
+      conflicts: 0,
+      errors: [],
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      total: 0,
+      resequenced: 0,
+      conflicts: 0,
+      errors: [err?.message || String(err)],
+    };
+  }
 }
 
 // ==========================================

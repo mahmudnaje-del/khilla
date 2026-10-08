@@ -34,6 +34,9 @@ import {
   ChevronUp,
   CloudDownload,
   RefreshCw,
+  Globe,
+  EyeOff,
+  User,
 } from "lucide-react";
 import { Fatwa, FatwaStatus } from "../types";
 import { WordImportModal } from "./WordImportModal";
@@ -168,6 +171,8 @@ export const FatwaArchive: React.FC<FatwaArchiveProps> = ({
       (f.question_original && f.question_original.toLowerCase().includes(query)) ||
       (f.answer_clean && f.answer_clean.toLowerCase().includes(query)) ||
       (f.fatwaNumber && f.fatwaNumber.toString().includes(query)) ||
+      (f.transcriber_name && f.transcriber_name.toLowerCase().includes(query)) ||
+      (f.transcriber_group && f.transcriber_group.toString().toLowerCase().includes(query)) ||
       (f.tags && f.tags.some((t) => t.toLowerCase().includes(query)));
 
     const matchesStatus =
@@ -635,6 +640,24 @@ export const FatwaArchive: React.FC<FatwaArchiveProps> = ({
                       </span>
                     </div>
 
+                    {/* Transcriber & Group Info for Editors */}
+                    {(fatwa.transcriber_name || fatwa.transcriber_group) && (
+                      <div className="flex items-center gap-2 text-[11px] text-stone-700 bg-emerald-50/80 px-2.5 py-1 rounded-xl border border-emerald-200/80 w-fit">
+                        <div className="flex items-center gap-1 font-bold text-[#0c392c] font-cairo">
+                          <User className="w-3 h-3 text-emerald-700" />
+                          <span>المفرّغ: {fatwa.transcriber_name || "غير محدد"}</span>
+                        </div>
+                        {fatwa.transcriber_group && (
+                          <>
+                            <span className="text-emerald-300">•</span>
+                            <span className="font-bold text-amber-900 font-mono bg-amber-100/90 px-1.5 py-0.5 rounded text-[10px] border border-amber-300/80">
+                              مجموعة #{fatwa.transcriber_group}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {/* Question */}
                     <div className="space-y-1">
                       <div className="text-[11px] font-bold text-stone-500 font-cairo">السؤال:</div>
@@ -663,16 +686,33 @@ export const FatwaArchive: React.FC<FatwaArchiveProps> = ({
                   {/* Bottom Card Actions */}
                   <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {fatwa.status !== "معتمدة" && fatwa.status !== "منشورة" && (
+                      {fatwa.status === "منشورة" || (fatwa.status === "معتمدة" && fatwa.approved !== false) ? (
                         <button
+                          type="button"
                           onClick={() => {
-                            onUpdateStatus(fatwa.id, "معتمدة");
+                            if (window.confirm(`هل أنت متأكد من إلغاء نشر الفتوى #${fatwa.fatwaNumber || ""} وسحبها من واجهة القراء؟`)) {
+                              onUpdateStatus(fatwa.id, "تحتاج مراجعة");
+                              showToast(`تم إلغاء نشر الفتوى #${fatwa.fatwaNumber || ""} وسحبها من واجهة القراء فوراً`, "info");
+                            }
                           }}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-900 hover:bg-emerald-50 hover:text-emerald-800 border border-amber-300 hover:border-emerald-300 transition-colors shadow-2xs"
-                          title="اعتماد الفتوى وإرسالها مباشرة لقاعدة بيانات الإدارة (/admin)"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-900 hover:bg-rose-50 hover:text-rose-800 border border-amber-300 hover:border-rose-300 transition-colors shadow-2xs cursor-pointer"
+                          title="إلغاء نشر هذه الفتوى وسحبها من واجهة القراء فوراً"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>اعتماد</span>
+                          <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                          <span>إلغاء النشر</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onUpdateStatus(fatwa.id, "منشورة");
+                            showToast(`تم نشر الفتوى #${fatwa.fatwaNumber || ""} في واجهة القراء بشكل لحظي 🌐`, "success");
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-500/50 transition-colors shadow-2xs cursor-pointer"
+                          title="نشر الفتوى لتظهر في واجهة القراء والبحث العام فوراً"
+                        >
+                          <Globe className="w-3.5 h-3.5 text-amber-300" />
+                          <span>نشر للقراء</span>
                         </button>
                       )}
 

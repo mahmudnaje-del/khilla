@@ -22,6 +22,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { loginAdmin, setAdminSession } from "../utils/adminApi";
+import { EDITOR_AUTH_KEY } from "../utils/editorAuth";
 
 interface HeaderProps {
   activeTab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin";
@@ -60,13 +61,6 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Admin password modal state (khilla123)
-  const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
-  const [adminPasswordError, setAdminPasswordError] = useState<string | null>(null);
-  const [showPasswordText, setShowPasswordText] = useState(false);
-  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
-
   const navItems = [
     {
       id: "stats" as const,
@@ -100,6 +94,12 @@ export const Header: React.FC<HeaderProps> = ({
       icon: ImageIcon,
     },
     {
+      id: "admin" as const,
+      label: "لوحة الإدارة والتصحيح",
+      subLabel: "Fix & Resequence",
+      icon: ShieldCheck,
+    },
+    {
       id: "developer" as const,
       label: "عن المطور",
       subLabel: "About Developer",
@@ -111,67 +111,10 @@ export const Header: React.FC<HeaderProps> = ({
   const clickTimerRef = useRef<any>(null);
   const clickCountRef = useRef<number>(0);
 
+  // Handle clicking on Sheikh's avatar to navigate to Admin Portal (لوحة الإدارة وتصحيح الأرقام والأخطاء)
   const handleSheikhImageClick = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
-    clickCountRef.current += 1;
-
-    if (clickCountRef.current === 1) {
-      clickTimerRef.current = setTimeout(() => {
-        clickCountRef.current = 0;
-      }, 400);
-    } else if (clickCountRef.current >= 2) {
-      clearTimeout(clickTimerRef.current);
-      clickCountRef.current = 0;
-      setAdminPasswordInput("");
-      setAdminPasswordError(null);
-      setIsAdminPasswordModalOpen(true);
-    }
-  };
-
-  const handleAdminPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminPasswordError(null);
-
-    const enteredPassword = adminPasswordInput.trim();
-    if (!enteredPassword) {
-      setAdminPasswordError("يرجى إدخال كلمة المرور المعتمدة");
-      return;
-    }
-
-    setIsVerifyingPassword(true);
-
-    if (enteredPassword === "khilla123") {
-      const res = await loginAdmin("khilla", "khilla123");
-      if (res.success && res.user && res.token) {
-        setAdminSession({
-          user: res.user,
-          token: res.token,
-          timestamp: Date.now(),
-        });
-      } else {
-        // Fallback local session if server is offline
-        setAdminSession({
-          user: {
-            username: "khilla",
-            name: "فضيلة الشيخ د. عبد الباري خلة",
-            role: "admin",
-          },
-          token: "admin_token_khilla_" + Date.now(),
-          timestamp: Date.now(),
-        });
-      }
-
-      setIsVerifyingPassword(false);
-      setIsAdminPasswordModalOpen(false);
-      setAdminPasswordInput("");
-      setActiveTab("admin");
-      if (showToast) {
-        showToast("مرحباً بك فضيلة الشيخ في لوحة الإدارة المركزية", "success");
-      }
-    } else {
-      setIsVerifyingPassword(false);
-      setAdminPasswordError("كلمة المرور غير صحيحة! يرجى إدخال كلمة المرور الصحيحة.");
-    }
+    setActiveTab("admin");
   };
 
   return (
@@ -187,9 +130,12 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 1. Sheikh's Icon (Avatar) */}
             <div
               className="w-13 h-13 rounded-full bg-[#f6f2e9] text-[#0c392c] flex items-center justify-center font-amiri font-bold shadow-[0_0_15px_rgba(212,175,55,0.25)] border-2 border-amber-300/80 group-hover:border-amber-300 group-hover:scale-105 transition-all duration-300 shrink-0 overflow-hidden relative cursor-pointer active:scale-95"
-              title="أيقونة فضيلة الشيخ د. عبد الباري خلة (انقر نقرتين لفتح لوحة الإدارة)"
+              title="أيقونة فضيلة الشيخ د. عبد الباري خلة (انقر لفتح لوحة الإدارة وتصحيح الفتاوى والأرقام)"
               onClick={handleSheikhImageClick}
-              onDoubleClick={handleSheikhImageClick}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setIsAuthModalOpen(true);
+              }}
               onTouchEnd={handleSheikhImageClick}
             >
               <img
@@ -436,9 +382,12 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 2. Sheikh's Icon */}
             <div
               className="w-9 h-9 rounded-full bg-[#f6f2e9] text-[#0c392c] flex items-center justify-center shadow-xs shrink-0 overflow-hidden relative border-2 border-amber-300/80 cursor-pointer active:scale-95 transition-transform"
-              title="أيقونة فضيلة الشيخ د. عبد الباري خلة (انقر نقرتين لفتح لوحة الإدارة)"
+              title="أيقونة فضيلة الشيخ د. عبد الباري خلة (انقر لفتح لوحة الإدارة وتصحيح الفتاوى والأرقام)"
               onClick={handleSheikhImageClick}
-              onDoubleClick={handleSheikhImageClick}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setIsAuthModalOpen(true);
+              }}
               onTouchEnd={handleSheikhImageClick}
             >
               <img
@@ -570,6 +519,24 @@ export const Header: React.FC<HeaderProps> = ({
                 {strictMode ? "مفعّل" : "معطل"}
               </button>
             </div>
+
+            {/* Mobile Editor Gate Button */}
+            <div className="pt-2 border-t border-emerald-900/60 flex items-center justify-between text-xs">
+              <span className="text-stone-300 text-xs flex items-center gap-1.5">
+                {isAuthenticated ? <Unlock className="w-3.5 h-3.5 text-emerald-400" /> : <Lock className="w-3.5 h-3.5 text-stone-400" />}
+                <span>{isAuthenticated ? "لوحة التحرير موثقة" : "تسجيل دخول المحرر"}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAuthModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-900/70 hover:bg-emerald-800 text-emerald-200 border border-emerald-700/50 transition-colors"
+              >
+                {isAuthenticated ? "إدارة الصلاحية" : "دخول"}
+              </button>
+            </div>
           </div>
         )}
       </header>
@@ -578,7 +545,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0c392c]/95 backdrop-blur-md border-t border-emerald-900/80 px-2 py-2 shadow-2xl safe-area-pb">
         <div className="grid grid-cols-5 gap-1 max-w-md mx-auto">
           {navItems
-            .filter((item) => item.id !== "developer")
+            .filter((item) => item.id !== "developer" && item.id !== "admin")
             .map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -616,115 +583,6 @@ export const Header: React.FC<HeaderProps> = ({
             })}
         </div>
       </div>
-
-      {/* Admin Password Verification Modal (khilla123) */}
-      {isAdminPasswordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm animate-in fade-in duration-200">
-          <div
-            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-emerald-800/30 animate-in zoom-in-95 duration-200 flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="bg-[#0c392c] text-white p-6 relative flex flex-col items-center text-center">
-              <button
-                type="button"
-                onClick={() => setIsAdminPasswordModalOpen(false)}
-                className="absolute top-4 left-4 p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                title="إغلاق"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="w-20 h-20 rounded-full bg-[#f6f2e9] text-[#0c392c] flex items-center justify-center shadow-lg border-3 border-amber-300/80 mb-3 overflow-hidden relative">
-                <img
-                  src="/icon-alshekh.png"
-                  alt="فضيلة الشيخ د. عبد الباري خلة"
-                  className="w-full h-full object-cover object-center"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = "/sheikh-avatar.png";
-                  }}
-                />
-              </div>
-
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-800/80 text-amber-300 border border-emerald-600/50 text-xs font-bold font-cairo mb-1.5 shadow-xs">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>لوحة الإدارة المركزية</span>
-              </div>
-
-              <h3 className="text-lg font-bold font-cairo text-white">
-                فضيلة الشيخ د. عبد الباري خلة
-              </h3>
-              <p className="text-xs text-emerald-200/90 font-tajawal mt-1 max-w-xs">
-                يرجى إدخال كلمة المرور المعتمدة للوصول إلى لوحة التحكم المركزية وإدارة الفتاوى
-              </p>
-            </div>
-
-            {/* Modal Body / Form */}
-            <form onSubmit={handleAdminPasswordSubmit} className="p-6 space-y-4 bg-stone-50/50">
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-stone-700 font-cairo text-right">
-                  كلمة المرور المشرف:
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-stone-400">
-                    <KeyRound className="w-4 h-4 text-emerald-700" />
-                  </div>
-                  <input
-                    type={showPasswordText ? "text" : "password"}
-                    value={adminPasswordInput}
-                    onChange={(e) => {
-                      setAdminPasswordInput(e.target.value);
-                      if (adminPasswordError) setAdminPasswordError(null);
-                    }}
-                    placeholder="••••••••"
-                    autoFocus
-                    required
-                    className="w-full pl-10 pr-10 py-3 rounded-2xl bg-white border border-stone-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-sm font-medium text-stone-900 outline-hidden transition-all shadow-2xs text-right font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPasswordText(!showPasswordText)}
-                    className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-stone-400 hover:text-stone-700 transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showPasswordText ? (
-                      <EyeOff className="w-4 h-4 text-stone-600" />
-                    ) : (
-                      <Eye className="w-4 h-4 text-stone-600" />
-                    )}
-                  </button>
-                </div>
-
-                {adminPasswordError && (
-                  <p className="text-xs font-bold text-red-600 font-tajawal text-right animate-in fade-in">
-                    {adminPasswordError}
-                  </p>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={isVerifyingPassword}
-                  className="flex-1 py-3 px-4 rounded-2xl bg-[#0c392c] hover:bg-[#14532d] active:scale-98 text-amber-300 font-bold font-cairo text-sm shadow-md transition-all flex items-center justify-center gap-2 border border-emerald-700/50 cursor-pointer disabled:opacity-50"
-                >
-                  <Lock className="w-4 h-4 text-amber-300" />
-                  <span>{isVerifyingPassword ? "جارٍ التحقق..." : "دخول لوحة الإدارة"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsAdminPasswordModalOpen(false)}
-                  className="py-3 px-4 rounded-2xl bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold font-cairo text-sm transition-all cursor-pointer"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </>
   );
 };

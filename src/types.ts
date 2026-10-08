@@ -41,6 +41,8 @@ export interface Fatwa {
   approved: boolean;
   approved_by?: string;
   approved_at?: string;
+  isPublic?: boolean;
+  published_at?: string;
   has_wallahu_aalam: boolean;
   category?: string;
   tags?: string[];
@@ -55,6 +57,10 @@ export interface Fatwa {
   pendingSync?: boolean;
   /** فتوى مختارة للصفحة العامة. الحقل اختياري حتى لا تتغير السجلات القديمة. */
   isFeatured?: boolean;
+  /** اسم المفرغ الذي قام بتفريغ الفتوى */
+  transcriber_name?: string;
+  /** رقم المجموعة التي يفرغ منها المفرغ */
+  transcriber_group?: string | number;
 }
 
 export type SyncStatus = 'initializing' | 'connecting' | 'synced' | 'offline' | 'error' | 'permission-denied' | 'quota-exceeded';

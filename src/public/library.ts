@@ -47,9 +47,12 @@ export function normalizeArabic(value: string): string {
 
 export function isPublicFatwa(fatwa: Fatwa): boolean {
   if (!fatwa || fatwa.deleted) return false;
-  if (fatwa.status !== "معتمدة" && fatwa.status !== "منشورة") return false;
-  if (fatwa.approved === false && fatwa.status !== "منشورة") return false;
-  return true;
+  if (fatwa.approved === false) return false;
+  if (fatwa.isPublic === false) return false;
+  if (fatwa.status === "تحتاج مراجعة" || fatwa.status === "مسودة" || fatwa.status === "مراجعة") return false;
+  if (fatwa.status === "منشورة") return true;
+  if (fatwa.status === "معتمدة" && fatwa.isPublic === true) return true;
+  return false;
 }
 
 export function getPublicFatwas(fatwas: Fatwa[]): Fatwa[] {

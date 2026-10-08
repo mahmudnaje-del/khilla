@@ -2,6 +2,38 @@ import { Fatwa, CardTemplateSettings } from "../types";
 
 export const PREFERRED_TEMPLATE_STYLE_KEY = "sheikh_khalla_preferred_template_style";
 
+export interface TranscriberInfo {
+  name: string;
+  groupNumber: string;
+}
+
+export const TRANSCRIBER_INFO_KEY = "khalla_transcriber_info_v1";
+
+export function getStoredTranscriberInfo(): TranscriberInfo | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(TRANSCRIBER_INFO_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.name === "string" && parsed.name.trim()) {
+      return {
+        name: parsed.name.trim(),
+        groupNumber: String(parsed.groupNumber || "").trim(),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+export function setStoredTranscriberInfo(info: TranscriberInfo): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(TRANSCRIBER_INFO_KEY, JSON.stringify(info));
+      window.dispatchEvent(new CustomEvent("transcriber-info-changed", { detail: info }));
+    }
+  } catch {}
+}
+
 export function getPreferredTemplateStyle(): "official_khalla" | "classic" | "uthmanic" {
   try {
     if (typeof localStorage === "undefined") return "official_khalla";

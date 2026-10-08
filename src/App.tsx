@@ -15,8 +15,10 @@ import { DeveloperPage } from "./components/DeveloperPage";
 import { AdminPortal } from "./components/AdminPortal";
 import PWADiagnostics from "./components/PWADiagnostics";
 import { AuthModal } from "./components/AuthModal";
+import { isEditorAuthorized, revokeEditorAuthorization } from "./utils/editorAuth";
 import { InstallPromptModal } from "./components/InstallPromptModal";
 import { ToastContainer, ToastMessage } from "./components/Toast";
+import confetti from "canvas-confetti";
 import { ArabicFatwaDetailsModal } from "./components/ArabicFatwaDetailsModal";
 import { PublicPlatform, AdminReportsPanel, AdminSyncPanel } from "./public/PublicPlatform";
 import { adminDestination, ensureShareLandsInAdmin, isAdminPath, isShareLaunch, pathForTab } from "./public/routes";
@@ -38,6 +40,7 @@ import {
   isFatwaDeleted,
   reconcileFatwasWithCloud,
   mergeWithServerFatwas,
+  getStoredTranscriberInfo,
 } from "./utils/storage";
 import {
   subscribeToFatwas,
@@ -81,7 +84,8 @@ export default function App() {
   });
 
   const [strictMode, setStrictMode] = useState<boolean>(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isEditorVerified, setIsEditorVerified] = useState<boolean>(() => isEditorAuthorized());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => isEditorAuthorized());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState<boolean>(false);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(true);
@@ -89,6 +93,17 @@ export default function App() {
   const [pendingWritesCount, setPendingWritesCount] = useState<number>(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [detailsModalFatwa, setDetailsModalFatwa] = useState<Fatwa | null>(null);
+
+  const handleOpenAdmin = () => {
+    if (isEditorAuthorized()) {
+      setIsEditorVerified(true);
+      setIsAuthenticated(true);
+      window.history.pushState(null, "", "/admin");
+      setHref("/admin");
+    } else {
+      setIsAuthModalOpen(true);
+    }
+  };
 
   useEffect(() => {
     const sync = () => setHref(window.location.pathname + window.location.search);
@@ -156,10 +171,33 @@ export default function App() {
     };
   }, []);
 
-  // Immediate canonical hydration from Server / static seed to guarantee all 386+ fatwas are always present
+  // Immediate canonical hydration from Firestore / Server to guarantee all authoritative fatwas are always loaded
   useEffect(() => {
     let isCancelled = false;
     const hydrateCanonicalFatwas = async () => {
+      // 1. Direct Cloud Firestore authoritative fetch
+      try {
+        const firestoreResult = await fetchAllUserFatwasFromFirestore(7000);
+        if (firestoreResult.success && Array.isArray(firestoreResult.fatwas) && firestoreResult.fatwas.length > 0 && !isCancelled) {
+          if (firestoreResult.deletedIds && firestoreResult.deletedIds.length > 0) {
+            firestoreResult.deletedIds.forEach((id) => recordDeletedFatwa(id));
+          }
+          setFatwas((prev) => {
+            const reconciled = reconcileFatwasWithCloud(prev, firestoreResult.fatwas);
+            saveFatwasToStorage(reconciled);
+            return reconciled;
+          });
+          setCurrentFatwa((curr) => {
+            if (curr) return curr;
+            return firestoreResult.fatwas[0] || null;
+          });
+          return;
+        }
+      } catch (fErr) {
+        console.warn("Direct Firestore initial fetch fallback to server:", fErr);
+      }
+
+      // 2. Central Server API fallback (which is also synchronized with Firestore)
       try {
         const res = await fetch("/api/fatwas");
         if (res.ok) {
@@ -181,7 +219,7 @@ export default function App() {
         console.warn("Could not fetch /api/fatwas, falling back to static seed:", err);
       }
 
-      // Static fallback if API is unreachable (e.g. offline cache)
+      // 3. Static fallback if API is unreachable (e.g. offline cache)
       try {
         const staticRes = await fetch("/data/seed_fatwas.json");
         if (staticRes.ok) {
@@ -451,6 +489,8 @@ export default function App() {
         ...(newFatwaData.template_settings || {}),
         templateStyle: newFatwaData.template_settings?.templateStyle || defaultStyle,
       },
+      transcriber_name: newFatwaData.transcriber_name || getStoredTranscriberInfo()?.name || "",
+      transcriber_group: newFatwaData.transcriber_group || getStoredTranscriberInfo()?.groupNumber || "",
     };
 
     // 1. Immediately update state and persistent local storage
@@ -622,7 +662,7 @@ export default function App() {
   const handleUpdateFatwa = async (updated: Fatwa) => {
     const expectedVersion = updated.version || 1;
     const now = new Date().toISOString();
-    const isApproved = updated.status === "معتمدة" || updated.status === "منشورة" || Boolean(updated.approved);
+    const isApproved = updated.approved === false ? false : (updated.status === "معتمدة" || updated.status === "منشورة" || Boolean(updated.approved));
     const updatedFatwa: Fatwa = {
       ...updated,
       approved: isApproved,
@@ -844,6 +884,186 @@ export default function App() {
     handleUpdateFatwa(updated);
   };
 
+  const [isPublishSyncing, setIsPublishSyncing] = useState(false);
+
+  // Publish all approved fatwas with auto-sync of all transcribers
+  const handleBatchPublishApproved = async () => {
+    setIsPublishSyncing(true);
+    showToast("جارٍ مزامنة فتاوى المفرغين ونشر كافة الفتاوى المعتمدة للبنية التحتية وواجهة القراء...", "info");
+    try {
+      const res = await fetch("/api/fatwas/publish-all-approved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fatwas }),
+      });
+      const data = await res.json();
+
+      const now = new Date().toISOString();
+      let localPublishedCount = 0;
+
+      setFatwas((prev) => {
+        const serverList = (data.success && Array.isArray(data.fatwas)) ? data.fatwas : [];
+        const serverMap = new Map(serverList.map((f: any) => [f.id, f]));
+
+        const updated = prev.map((f) => {
+          if (serverMap.has(f.id)) {
+            return serverMap.get(f.id);
+          }
+          if (f.status === "معتمدة" || f.approved || f.status === "منشورة") {
+            localPublishedCount++;
+            return {
+              ...f,
+              status: "منشورة" as const,
+              approved: true,
+              isPublic: true,
+              published_at: f.published_at || now,
+              updated_at: now,
+              pendingSync: true,
+            };
+          }
+          return f;
+        });
+
+        // Include any missing from server
+        serverList.forEach((sf: any) => {
+          if (!updated.some((item) => item.id === sf.id)) {
+            updated.push(sf);
+          }
+        });
+
+        saveFatwasToStorage(updated);
+        return updated;
+      });
+
+      flushPendingSyncQueue().catch(() => {});
+
+      const totalPublished = (data.success && typeof data.count === "number") ? data.count : localPublishedCount;
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+      showToast(`تم بنجاح نشر جميع الفتاوى المعتمدة (${totalPublished} فتوى) وأصبحت متاحة فوراً في واجهة القراء 🌐`, "success");
+    } catch (e: any) {
+      console.error("Batch publish error:", e);
+      const now = new Date().toISOString();
+      let count = 0;
+      setFatwas((prev) => {
+        const updated = prev.map((f) => {
+          if (f.status === "معتمدة" || f.approved || f.status === "منشورة") {
+            count++;
+            return {
+              ...f,
+              status: "منشورة" as const,
+              approved: true,
+              isPublic: true,
+              published_at: f.published_at || now,
+              updated_at: now,
+            };
+          }
+          return f;
+        });
+        saveFatwasToStorage(updated);
+        return updated;
+      });
+      showToast(`تم نشر جميع الفتاوى المعتمدة محلياً (${count} فتوى) وتحديث واجهة القراء فوراً`, "success");
+    } finally {
+      setIsPublishSyncing(false);
+    }
+  };
+
+  // Unpublish a single fatwa by its number
+  const handleUnpublishFatwaByNumber = async (rawNumber: string | number): Promise<boolean> => {
+    const cleanNum = Number(String(rawNumber).replace(/[^\d]/g, ""));
+    const rawStr = String(rawNumber).trim();
+    if (!cleanNum && !rawStr) {
+      showToast("يرجى إدخال رقم الفتوى المطلوب إلغاء نشرها", "error");
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/fatwas/unpublish-by-number", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fatwaNumber: rawNumber }),
+      });
+      const data = await res.json();
+
+      let targetItem: Fatwa | null = null;
+      const now = new Date().toISOString();
+
+      setFatwas((prev) => {
+        const updated = prev.map((f) => {
+          const match = (cleanNum && Number(f.fatwaNumber) === cleanNum) || f.id === rawStr;
+          if (match) {
+            targetItem = {
+              ...f,
+              status: "معتمدة" as const,
+              approved: true,
+              isPublic: false,
+              updated_at: now,
+              pendingSync: true,
+            };
+            return targetItem;
+          }
+          return f;
+        });
+        saveFatwasToStorage(updated);
+        return updated;
+      });
+
+      if (targetItem) {
+        showToast(`تم إلغاء نشر الفتوى رقم #${(targetItem as Fatwa).fatwaNumber || cleanNum} وسحبها من واجهة القراء فوراً 🚫`, "info");
+        return true;
+      } else if (data.success && data.fatwa) {
+        showToast(`تم إلغاء نشر الفتوى رقم #${data.fatwa.fatwaNumber || cleanNum} وسحبها من واجهة القراء 🚫`, "info");
+        return true;
+      } else {
+        showToast(`لم يتم العثور على فتوى برقم ${rawNumber} في النظام`, "error");
+        return false;
+      }
+    } catch (e: any) {
+      console.error("Unpublish single error:", e);
+      showToast("حدث خطأ أثناء الاتصال بالخادم لإلغاء نشر الفتوى", "error");
+      return false;
+    }
+  };
+
+  // Unpublish all fatwas from readers platform
+  const handleUnpublishAllFatwas = async () => {
+    try {
+      const res = await fetch("/api/fatwas/unpublish-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+
+      const now = new Date().toISOString();
+      let count = 0;
+
+      setFatwas((prev) => {
+        const updated = prev.map((f) => {
+          if (f.status === "منشورة" || f.isPublic === true) {
+            count++;
+            return {
+              ...f,
+              status: "معتمدة" as const,
+              approved: true,
+              isPublic: false,
+              updated_at: now,
+              pendingSync: true,
+            };
+          }
+          return f;
+        });
+        saveFatwasToStorage(updated);
+        return updated;
+      });
+
+      const totalUnpublished = (data.success && typeof data.count === "number") ? data.count : count;
+      showToast(`تم إلغاء نشر جميع الفتاوى (${totalUnpublished} فتوى) وسحبها فوراً من واجهة القراء 🚫`, "info");
+    } catch (e: any) {
+      console.error("Unpublish all error:", e);
+      showToast("حدث خطأ أثناء محاولة إلغاء نشر جميع الفتاوى", "error");
+    }
+  };
+
   // New fatwa action
   const handleStartNewFatwa = () => {
     setActiveTab("transcribe");
@@ -893,12 +1113,68 @@ export default function App() {
       <>
         <PublicPlatform
           fatwas={fatwas}
-          onOpenAdmin={() => {
-            window.history.pushState(null, "", "/admin");
-            setHref("/admin");
-          }}
+          onOpenAdmin={handleOpenAdmin}
         />
         <InstallPromptModal isOpen={isInstallModalOpen} onClose={() => setIsInstallModalOpen(false)} />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onSuccess={() => {
+            setIsEditorVerified(true);
+            setIsAuthenticated(true);
+            window.history.pushState(null, "", "/admin");
+            setHref("/admin");
+            showToast("تم التحقق من كلمات السر بنجاح، مرحباً بك في لوحة المحررين", "success");
+          }}
+          isAuthenticated={isAuthenticated}
+          onLogout={() => {
+            revokeEditorAuthorization();
+            setIsEditorVerified(false);
+            setIsAuthenticated(false);
+            showToast("تم تسجيل الخروج وقفل اللوحة", "info");
+          }}
+          title="الدخول إلى لوحة المحررين"
+          subtitle="يُطلب إدخال كلمات السر المعتمدة للوصول إلى لوحة المحررين. تُطلب هذه الكلمات مرة واحدة فقط عند الدخول أول مرة."
+        />
+        <ToastContainer toasts={toasts} onRemove={removeToast} />
+      </>
+    );
+  }
+
+  // Gatekeeper: If navigating directly to admin path without verifying the two secret values
+  if (adminMode && !isEditorVerified) {
+    return (
+      <>
+        <PublicPlatform
+          fatwas={fatwas}
+          onOpenAdmin={() => setIsAuthModalOpen(true)}
+        />
+        <AuthModal
+          isOpen={true}
+          onClose={() => {
+            window.history.pushState(null, "", "/");
+            setHref("/");
+          }}
+          onSuccess={() => {
+            setIsEditorVerified(true);
+            setIsAuthenticated(true);
+            showToast("تم التحقق من كلمات السر بنجاح، مرحباً بك في لوحة المحررين", "success");
+          }}
+          isAuthenticated={false}
+          onLogout={() => {
+            revokeEditorAuthorization();
+            setIsEditorVerified(false);
+            setIsAuthenticated(false);
+          }}
+          title="الدخول إلى لوحة المحررين"
+          subtitle="يُطلب إدخال كلمات السر المعتمدة للوصول إلى لوحة وتفريغ الفتاوى. تُطلب هذه الكلمات مرة واحدة فقط عند الدخول أول مرة."
+          showCancelReturnToPublic={true}
+          onReturnToPublic={() => {
+            window.history.pushState(null, "", "/");
+            setHref("/");
+          }}
+        />
+        <ToastContainer toasts={toasts} onRemove={removeToast} />
       </>
     );
   }
@@ -950,6 +1226,11 @@ export default function App() {
                   onNavigateToCard={() => setActiveTab("card")}
                   onNavigateToReview={() => setActiveTab("review")}
                   onOpenArabicDetails={(f) => setDetailsModalFatwa(f)}
+                  fatwas={fatwas}
+                  onPublishAllApproved={handleBatchPublishApproved}
+                  onUnpublishFatwaByNumber={handleUnpublishFatwaByNumber}
+                  onUnpublishAllFatwas={handleUnpublishAllFatwas}
+                  isPublishSyncing={isPublishSyncing}
                 />
               </motion.div>
             )}
@@ -1047,6 +1328,11 @@ export default function App() {
                     setActiveTab("review");
                   }}
                   onOpenArchive={() => setActiveTab("archive")}
+                  onPublishAllApproved={handleBatchPublishApproved}
+                  onUnpublishFatwaByNumber={handleUnpublishFatwaByNumber}
+                  onUnpublishAllFatwas={handleUnpublishAllFatwas}
+                  isPublishSyncing={isPublishSyncing}
+                  showToast={showToast}
                 />
               </motion.div>
             )}
@@ -1061,6 +1347,7 @@ export default function App() {
               >
                 <DeveloperPage
                   onNavigateToTranscribe={() => setActiveTab("transcribe")}
+                  onNavigateToAdmin={() => setActiveTab("admin")}
                   onRunFullSyncCampaign={handleFetchAllUserFatwas}
                   showToast={showToast}
                   fatwas={fatwas}
@@ -1117,13 +1404,18 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={() => {
+          setIsEditorVerified(true);
           setIsAuthenticated(true);
-          showToast("تم تسجيل الدخول بنجاح كمحرر معتمد", "success");
+          showToast("تم التحقق من كلمات السر بنجاح كمحرر معتمد", "success");
         }}
         isAuthenticated={isAuthenticated}
         onLogout={() => {
+          revokeEditorAuthorization();
+          setIsEditorVerified(false);
           setIsAuthenticated(false);
-          showToast("تم تسجيل الخروج", "info");
+          window.history.pushState(null, "", "/");
+          setHref("/");
+          showToast("تم تسجيل الخروج وقفل لوحة المحررين", "info");
         }}
       />
 

@@ -23,6 +23,7 @@ import {
   Bookmark,
   CheckCircle2,
   RotateCcw,
+  User,
 } from "lucide-react";
 import { toPng } from "html-to-image";
 import { Fatwa } from "../types";
@@ -311,6 +312,18 @@ ${!tashkeelAnswer.includes("والله أعلم") ? "وَاللَّهُ تَعَ
               {fatwa.fatwaType === "moasala" && (
                 <span className="px-2.5 py-1 rounded-xl bg-[#0c392c] text-amber-200 font-bold text-[11px]">
                   فتوى مؤصلة بالأدلة
+                </span>
+              )}
+
+              {(fatwa.transcriber_name || fatwa.transcriber_group) && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-100/80 border border-emerald-300 text-emerald-950 font-bold font-cairo text-[11px]">
+                  <User className="w-3 h-3 text-emerald-700" />
+                  <span>المفرّغ: {fatwa.transcriber_name || "غير محدد"}</span>
+                  {fatwa.transcriber_group && (
+                    <span className="font-mono text-amber-900 bg-amber-100 px-1 rounded">
+                      مجموعة #{fatwa.transcriber_group}
+                    </span>
+                  )}
                 </span>
               )}
             </div>

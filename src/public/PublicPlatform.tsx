@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Fatwa } from "../types";
 import { getAdminSession } from "../utils/adminApi";
+import { isEditorAuthorized } from "../utils/editorAuth";
 import {
   addReport,
   categoryCounts,
@@ -244,7 +245,7 @@ function PublicHeader({
   onToggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const admin = Boolean(getAdminSession());
+  const admin = Boolean(isEditorAuthorized());
   const links = [
     ["/", "الرئيسية"],
     ["/latest", "الفتاوى"],
@@ -255,11 +256,12 @@ function PublicHeader({
   return (
     <header className="pub-header sticky top-0 z-40">
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
-        <button type="button" onClick={() => onNavigate("/")} className="flex min-w-0 items-center gap-2 text-right">
-          <img src="/icon-app.png" alt="" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-[var(--line)]" />
+        <button type="button" onClick={() => onNavigate("/")} className="flex min-w-0 items-center gap-2.5 text-right">
+          <img src="/icon-app.png" alt="" className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl object-cover ring-1 ring-[var(--line)] shrink-0" />
           <span className="min-w-0">
-            <span className="pub-brand block truncate font-cairo text-sm font-bold">فتاوى الشيخ خلة</span>
-            <span className="pub-muted block text-[11px]">{online ? "متصل · الأرشيف محدّث" : "غير متصل · تقرأ من المحفوظ"}</span>
+            <span className="pub-brand block font-cairo text-[13px] xs:text-sm sm:text-base font-bold leading-tight tracking-tight">
+              فتاوى الشيخ عبد الباري محمد خلة
+            </span>
           </span>
         </button>
         <div className="ms-auto hidden items-center gap-4 lg:flex">
@@ -269,8 +271,10 @@ function PublicHeader({
             </button>
           ))}
           <button type="button" onClick={() => onNavigate("/search")} className="pub-solid rounded-full px-3 py-1.5 text-sm">بحث</button>
-          {admin && (
-            <button type="button" onClick={onOpenAdmin} className="pub-gold text-sm">غرفة التحرير</button>
+          {admin ? (
+            <button type="button" onClick={onOpenAdmin} className="pub-gold text-sm font-cairo">غرفة التحرير</button>
+          ) : (
+            <button type="button" onClick={onOpenAdmin} className="pub-chip text-xs rounded-full px-3 py-1 font-cairo hover:border-emerald-600 transition-colors">دخول المحررين</button>
           )}
         </div>
         <button type="button" onClick={onToggleTheme} className="pub-chip ms-auto flex h-11 w-11 items-center justify-center rounded-2xl lg:ms-0" aria-label={dark ? "الوضع الفاتح" : "الوضع الداكن"}>
@@ -358,9 +362,7 @@ function HomePage({
   return (
     <div className="space-y-8">
       <section className="pub-card rounded-[28px] px-4 py-6 sm:px-8">
-        <p className="pub-kicker text-sm">أرشيف علمي، لا محادثة آلية</p>
-        <hr className="pub-rule mt-3" />
-        <h1 className="pub-brand mt-3 font-cairo text-[1.65rem] font-bold leading-snug sm:text-4xl">ابحث في فتاوى الشيخ د. عبد الباري خلة</h1>
+        <h1 className="pub-brand font-cairo text-[1.65rem] font-bold leading-snug sm:text-4xl">ابحث في فتاوى الشيخ د. عبد الباري خلة</h1>
         <p className="pub-muted mt-3 max-w-2xl text-sm leading-8">اكتب سؤالك، وسنبحث في الفتاوى المعتمدة. المنصة تسترجع فتوى الشيخ ولا تؤلف جواباً.</p>
         <SearchBox onSubmit={(value) => { rememberSearch(value); onNavigate(`/search?q=${encodeURIComponent(value)}`); }} />
         <div className="mt-3 flex flex-wrap gap-2">
@@ -617,12 +619,35 @@ function FatwaPage({
       </div>
       <section className="pub-question rounded-3xl p-4 sm:p-7">
         <h1 className="font-cairo text-sm font-bold">السؤال</h1>
-        <p className="mt-3 font-amiri text-[1.35rem] leading-[2.05]">{question}</p>
+        <p
+          className="mt-3 font-amiri transition-all duration-150"
+          style={{
+            fontSize: `${1.35 * prefs.fontScale}rem`,
+            lineHeight: prefs.lineHeight,
+          }}
+        >
+          {question}
+        </p>
       </section>
       <section className="pub-answer rounded-3xl p-4 sm:p-7">
         <h2 className="font-cairo text-sm font-bold">الجواب</h2>
-        <p className="mt-3 whitespace-pre-wrap font-amiri text-[1.35rem] leading-[2.15]">{answer || "نص الجواب غير متوفر في النسخة العامة."}</p>
-        {fatwa.has_wallahu_aalam && <p className="pub-brand mt-8 text-center font-amiri text-xl">والله تعالى أعلم</p>}
+        <p
+          className="mt-3 whitespace-pre-wrap font-amiri transition-all duration-150"
+          style={{
+            fontSize: `${1.35 * prefs.fontScale}rem`,
+            lineHeight: prefs.lineHeight,
+          }}
+        >
+          {answer || "نص الجواب غير متوفر في النسخة العامة."}
+        </p>
+        {fatwa.has_wallahu_aalam && (
+          <p
+            className="pub-brand mt-8 text-center font-amiri font-bold transition-all duration-150"
+            style={{ fontSize: `${1.25 * prefs.fontScale}rem` }}
+          >
+            والله تعالى أعلم
+          </p>
+        )}
       </section>
       <AudioBlock fatwa={fatwa} onReport={() => onNavigate(`/report?fatwa=${encodeURIComponent(fatwa.id)}`)} />
       <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -680,6 +705,7 @@ function FatwaCard({
   onOpen: (fatwa: Fatwa) => void;
   onSave: (id: string) => void;
   note?: string;
+  key?: React.Key;
 }) {
   const [flipped, setFlipped] = useState(false);
   const question = publicQuestion(fatwa);
@@ -831,12 +857,135 @@ function SettingsPage({
   return (
     <div className="space-y-4">
       <h1 className="font-cairo text-2xl font-bold pub-brand">إعدادات القراءة</h1>
-      <label className="pub-card block rounded-2xl p-4">حجم الخط
-        <input type="range" min={0.9} max={1.35} step={0.05} value={prefs.fontScale} onChange={(event) => onChange({ ...prefs, fontScale: Number(event.target.value) })} className="mt-3 w-full" />
+      <label className="pub-card block rounded-2xl p-4 space-y-3 cursor-pointer">
+        <div className="flex items-center justify-between">
+          <span className="font-cairo font-bold text-base flex items-center gap-2">
+            <span>حجم الخط</span>
+            <span className="text-xs pub-muted font-normal">
+              {prefs.fontScale <= 0.85
+                ? "(صغير)"
+                : prefs.fontScale >= 1.45
+                ? "(كبير جداً للمسنين)"
+                : prefs.fontScale >= 1.2
+                ? "(كبير)"
+                : "(طبيعي)"}
+            </span>
+          </span>
+          <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full pub-solid">
+            {Math.round(prefs.fontScale * 100)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min={0.8}
+          max={1.65}
+          step={0.05}
+          value={prefs.fontScale}
+          onChange={(event) => onChange({ ...prefs, fontScale: Number(event.target.value) })}
+          className="w-full accent-emerald-700 cursor-pointer"
+        />
+        <div className="flex items-center justify-between gap-1 pt-1 text-xs">
+          {[
+            { label: "صغير", scale: 0.85 },
+            { label: "طبيعي", scale: 1.0 },
+            { label: "كبير", scale: 1.2 },
+            { label: "كبير جداً", scale: 1.45 },
+            { label: "جليّ", scale: 1.65 },
+          ].map((preset) => (
+            <button
+              key={preset.scale}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onChange({ ...prefs, fontScale: preset.scale });
+              }}
+              className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                Math.abs(prefs.fontScale - preset.scale) < 0.03
+                  ? "pub-solid ring-2 ring-emerald-500/40"
+                  : "pub-chip hover:opacity-80"
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
       </label>
-      <label className="pub-card block rounded-2xl p-4">تباعد الأسطر
-        <input type="range" min={1.6} max={2.3} step={0.1} value={prefs.lineHeight} onChange={(event) => onChange({ ...prefs, lineHeight: Number(event.target.value) })} className="mt-3 w-full" />
+
+      <label className="pub-card block rounded-2xl p-4 space-y-3 cursor-pointer">
+        <div className="flex items-center justify-between">
+          <span className="font-cairo font-bold text-base flex items-center gap-2">
+            <span>تباعد الأسطر</span>
+            <span className="text-xs pub-muted font-normal">
+              {prefs.lineHeight <= 1.6
+                ? "(متقارب)"
+                : prefs.lineHeight >= 2.4
+                ? "(واسع ومريح)"
+                : "(متوازن)"}
+            </span>
+          </span>
+          <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full pub-solid">
+            {prefs.lineHeight.toFixed(1)}x
+          </span>
+        </div>
+        <input
+          type="range"
+          min={1.5}
+          max={2.6}
+          step={0.1}
+          value={prefs.lineHeight}
+          onChange={(event) => onChange({ ...prefs, lineHeight: Number(event.target.value) })}
+          className="w-full accent-emerald-700 cursor-pointer"
+        />
+        <div className="flex items-center justify-between gap-1 pt-1 text-xs">
+          {[
+            { label: "مضغوط", height: 1.6 },
+            { label: "طبيعي", height: 1.9 },
+            { label: "متباعد", height: 2.2 },
+            { label: "واسع", height: 2.6 },
+          ].map((preset) => (
+            <button
+              key={preset.height}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onChange({ ...prefs, lineHeight: preset.height });
+              }}
+              className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                Math.abs(prefs.lineHeight - preset.height) < 0.06
+                  ? "pub-solid ring-2 ring-emerald-500/40"
+                  : "pub-chip hover:opacity-80"
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
       </label>
+
+      {/* معاينة حية وفورية لتأثير الخط والتباعد */}
+      <div className="pub-surface rounded-2xl p-4 border pub-border space-y-2.5 shadow-2xs">
+        <div className="flex items-center justify-between text-xs pub-muted font-bold">
+          <span className="flex items-center gap-1.5 font-cairo">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>معاينة حية وفورية لنص الفتوى وفق إعداداتك:</span>
+          </span>
+          <span className="font-mono text-[11px]">{Math.round(prefs.fontScale * 100)}% · {prefs.lineHeight.toFixed(1)}x</span>
+        </div>
+        <div
+          className="font-amiri transition-all duration-150 rounded-xl p-4 pub-bg-1 border pub-border shadow-xs"
+          style={{
+            fontSize: `${1.35 * prefs.fontScale}rem`,
+            lineHeight: prefs.lineHeight,
+          }}
+        >
+          <p className="font-bold mb-2">السؤال: ما حكم قراءة القرآن الكريم من الهاتف بغير وضوء؟</p>
+          <p className="pub-muted">
+            الجواب: الحمد لله والصلاة والسلام على رسول الله؛ تجوز قراءة القرآن من شاشة الهاتف من غير وضوء لأن الهاتف ليس مصحفاً ورقياً مخصوصاً، وإن كان الوضوء مستحباً على كل حال، والله تعالى أعلم.
+          </p>
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-2">
         {(["light", "dark", "system"] as const).map((theme) => (
           <button key={theme} type="button" onClick={() => onChange({ ...prefs, theme })} className={`min-h-11 rounded-xl ${prefs.theme === theme ? "pub-solid" : "pub-chip"}`}>{theme === "light" ? "فاتح" : theme === "dark" ? "داكن" : "النظام"}</button>

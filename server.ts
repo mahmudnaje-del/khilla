@@ -6,13 +6,22 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import mammoth from "mammoth";
 import multer from "multer";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDocs,
+  setLogLevel,
+} from "firebase/firestore";
 import {
   sanitizeQuestionGreeting,
   hasQuestionGreetingIssue,
   hasAnswerInQuestion,
   cleanQuestionAnswerBleed,
   separateQuestionAndAnswer,
-} from "./src/utils/greetingSanitizer.js";
+} from "./src/utils/greetingSanitizer.ts";
 
 dotenv.config();
 
@@ -64,11 +73,9 @@ async function generateContentWithSmartFallback(generateParams: any) {
   }
 
   // تسلسل النماذج المعتمد الأسرع والأدق للتفريغ الصوتي والمعالجة اللغوية العربية
-  // الأول: Gemini 3.5 Flash lite بناءً على طلب المستخدم المباشر
   const modelsToTry = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
+    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
   ];
 
@@ -457,19 +464,33 @@ function requireAdminAuth(req: express.Request, res: express.Response, next: exp
 // Admin Authentication Endpoint
 app.post("/api/admin/login", (req, res) => {
   const { username, password } = req.body;
+  const editorKey1 = process.env.EDITOR_SECRET_KEY_1;
+  const editorKey2 = process.env.EDITOR_SECRET_KEY_2;
   const adminSecret = process.env.ADMIN_PASSWORD;
 
-  // In production, use ADMIN_PASSWORD if configured, or default safely to khilla123
-  const validPass = adminSecret || "khilla123";
+  const u = (username || "").trim();
+  const p = (password || "").trim();
 
-  if (password === validPass) {
-    const safeUser = username || "khilla";
+  let isMatch = false;
+
+  // 1. Strict validation against environment secrets EDITOR_SECRET_KEY_1 & EDITOR_SECRET_KEY_2
+  if (editorKey1 && editorKey2) {
+    isMatch = Boolean(
+      u.toLowerCase() === editorKey1.trim().toLowerCase() &&
+      p === editorKey2.trim()
+    );
+  } else if (adminSecret) {
+    isMatch = Boolean(p === adminSecret.trim());
+  }
+
+  if (isMatch) {
+    const safeUser = u || "editor";
     const token = generateAdminToken(safeUser);
     res.json({
       success: true,
       user: {
         username: safeUser,
-        name: "فضيلة الشيخ د. عبد الباري خلة",
+        name: "المحرر المعتمد",
         role: "admin",
       },
       token,
@@ -477,7 +498,7 @@ app.post("/api/admin/login", (req, res) => {
   } else {
     res.status(401).json({
       success: false,
-      error: "كلمة المرور غير صحيحة. يرجى التأكد من البيانات والمحاولة مجدداً.",
+      error: "حساب المحررين أو كلمة السر غير صحيحة. يرجى التأكد من البيانات والمحاولة مجدداً.",
     });
   }
 });
@@ -561,6 +582,91 @@ function writeJsonFile(filePath: string, data: any[]): boolean {
     return false;
   }
 }
+
+// ==========================================
+// Centralized Cloud Firestore Server Synchronization
+// ==========================================
+let serverDb: any = null;
+try {
+  const fbConfigRaw = fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf-8");
+  const fbConfig = JSON.parse(fbConfigRaw);
+  if (fbConfig.projectId && fbConfig.apiKey) {
+    const fbApp = getApps().length === 0 ? initializeApp(fbConfig) : getApp();
+    serverDb = fbConfig.firestoreDatabaseId
+      ? getFirestore(fbApp, fbConfig.firestoreDatabaseId)
+      : getFirestore(fbApp);
+    try {
+      setLogLevel("error");
+    } catch {}
+    console.log("[Server Firestore] Connected to database:", fbConfig.firestoreDatabaseId || "(default)");
+  }
+} catch (fbErr: any) {
+  console.warn("[Server Firestore] Could not initialize Firebase on server:", fbErr?.message || fbErr);
+}
+
+// Function to pull latest fatwas from Firestore and synchronize disk files
+async function syncServerWithFirestore(): Promise<number> {
+  if (!serverDb) return 0;
+  try {
+    const colRef = collection(serverDb, "fatwas");
+    const snap = await getDocs(colRef);
+    if (snap.size > 0) {
+      const deletedSet = readDeletedIds();
+      const firestoreFatwas: any[] = [];
+      const firestoreApproved: any[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.deleted === true || isServerFatwaDeleted(data.id || d.id, data.fatwaNumber, deletedSet)) {
+          return;
+        }
+        const item: any = {
+          ...data,
+          id: data.id || d.id,
+          fatwaNumber: Number(data.fatwaNumber) || 0,
+        };
+        firestoreFatwas.push(item);
+        if (item.approved || item.status === "معتمدة" || item.status === "منشورة") {
+          firestoreApproved.push(item);
+        }
+      });
+
+      firestoreFatwas.sort((a, b) => (Number(b.fatwaNumber) || 0) - (Number(a.fatwaNumber) || 0));
+      firestoreApproved.sort((a, b) => (Number(b.fatwaNumber) || 0) - (Number(a.fatwaNumber) || 0));
+
+      writeJsonFile(USER_FATWAS_FILE, firestoreFatwas);
+      writeJsonFile(APPROVED_FATWAS_FILE, firestoreApproved);
+      try {
+        const publicSeedPath = path.join(process.cwd(), "public", "data", "seed_fatwas.json");
+        if (fs.existsSync(path.dirname(publicSeedPath))) {
+          fs.writeFileSync(publicSeedPath, JSON.stringify(firestoreFatwas, null, 2), "utf-8");
+        }
+      } catch (_) {}
+
+      console.log(`[Server Firestore Sync] Synced ${firestoreFatwas.length} active fatwas from Cloud Firestore (${firestoreApproved.length} approved).`);
+      return firestoreFatwas.length;
+    }
+  } catch (err: any) {
+    console.warn("[Server Firestore Sync] Fetch error:", err?.message || err);
+  }
+  return 0;
+}
+
+// Safe periodic background sync using unary getDocs without fragile gRPC Listen streams
+let serverSyncTimer: NodeJS.Timeout | null = null;
+function startServerPeriodicSync() {
+  if (!serverDb) return;
+  if (serverSyncTimer) clearInterval(serverSyncTimer);
+  serverSyncTimer = setInterval(() => {
+    syncServerWithFirestore().catch((err) => {
+      console.warn("[Server Firestore Periodic Sync] Notice:", err?.message || err);
+    });
+  }, 2 * 60 * 1000); // Check every 2 minutes
+}
+
+// Initial boot sync from Firestore
+syncServerWithFirestore().then(() => {
+  startServerPeriodicSync();
+});
 
 function cleanFatwaForServerStorage(f: any): any {
   if (!f) return null;
@@ -710,7 +816,7 @@ function resequenceAllServerFatwas(): { count: number; resequenced: any[] } {
 }
 
 
-function broadcastFatwaEvent(event: { type: string; fatwa?: any; fatwas?: any[]; id?: string; fatwaNumber?: number; count?: number }) {
+function broadcastFatwaEvent(event: { type: string; fatwa?: any; fatwas?: any[]; id?: string; fatwaNumber?: number; count?: number; timestamp?: string }) {
   const payload = `data: ${JSON.stringify(event)}\n\n`;
   for (const client of sseClients) {
     try {
@@ -782,10 +888,19 @@ app.get("/api/pending-fatwas", (req, res) => {
 });
 
 // GET all active fatwas (both approved and user submissions) for instant client hydration and archive access
-app.get("/api/fatwas", (req, res) => {
+app.get("/api/fatwas", async (req, res) => {
   const deletedSet = readDeletedIds();
-  const userList = readJsonFile(USER_FATWAS_FILE);
-  const approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+  let userList = readJsonFile(USER_FATWAS_FILE);
+  let approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+
+  // If local list is missing or small and Firestore is available, sync immediately
+  if (userList.length < 900 && serverDb) {
+    try {
+      await syncServerWithFirestore();
+      userList = readJsonFile(USER_FATWAS_FILE);
+      approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+    } catch (_) {}
+  }
 
   const map = new Map<string, any>();
   // 1. Load user submissions (which include latest drafts and approved entries)
@@ -891,6 +1006,13 @@ app.post("/api/fatwas/sync", (req, res) => {
           approvedMap.set(clean.id, clean);
         }
       }
+
+      // Asynchronously mirror write to Cloud Firestore
+      if (serverDb && clean.id) {
+        setDoc(doc(serverDb, "fatwas", clean.id), clean, { merge: true }).catch((err: any) => {
+          console.warn("[Firestore Server Sync Error]:", err?.message || err);
+        });
+      }
     });
 
     const updatedUserList = Array.from(userMap.values());
@@ -919,6 +1041,238 @@ app.post("/api/fatwas/sync", (req, res) => {
       uploadedCount,
       total: combinedAll.length,
       fatwas: combinedAll,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Infrastructure endpoint: Publish all approved fatwas to readers platform with auto-sync of transcribers' fatwas
+app.post("/api/fatwas/publish-all-approved", (req, res) => {
+  try {
+    const deletedSet = readDeletedIds();
+    let userList = readJsonFile(USER_FATWAS_FILE);
+    let approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+
+    // Auto-sync any transcribers' fatwas received in request body
+    const incoming = req.body?.fatwas;
+    if (Array.isArray(incoming) && incoming.length > 0) {
+      const userMap = new Map<string, any>();
+      userList.forEach((f: any) => {
+        if (f && f.id && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+          userMap.set(f.id, f);
+        }
+      });
+      const approvedMap = new Map<string, any>();
+      approvedList.forEach((f: any) => {
+        if (f && f.id && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+          approvedMap.set(f.id, f);
+        }
+      });
+
+      incoming.forEach((raw: any) => {
+        if (!raw || (!raw.id && !raw.fatwaNumber)) return;
+        if (isServerFatwaDeleted(raw.id, raw.fatwaNumber, deletedSet)) return;
+
+        const clean = cleanFatwaForServerStorage(raw);
+        if (!clean.id) {
+          clean.id = `fatwa-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        }
+        const existing = userMap.get(clean.id);
+        if (existing) {
+          const merged = { ...existing, ...clean };
+          userMap.set(clean.id, merged);
+          if (clean.approved || clean.status === "معتمدة" || clean.status === "منشورة") {
+            approvedMap.set(clean.id, merged);
+          }
+        } else {
+          userMap.set(clean.id, clean);
+          if (clean.approved || clean.status === "معتمدة" || clean.status === "منشورة") {
+            approvedMap.set(clean.id, clean);
+          }
+        }
+      });
+
+      userList = Array.from(userMap.values());
+      approvedList = Array.from(approvedMap.values());
+    }
+
+    const now = new Date().toISOString();
+    let publishedCount = 0;
+
+    const updatedUserList = userList.map((f: any) => {
+      if (f && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        if (f.status === "معتمدة" || f.approved || f.status === "منشورة") {
+          publishedCount++;
+          return {
+            ...f,
+            status: "منشورة",
+            approved: true,
+            isPublic: true,
+            published_at: f.published_at || now,
+            updated_at: now,
+          };
+        }
+      }
+      return f;
+    });
+
+    const updatedApprovedList = approvedList.map((f: any) => {
+      if (f && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        return {
+          ...f,
+          status: "منشورة",
+          approved: true,
+          isPublic: true,
+          published_at: f.published_at || now,
+          updated_at: now,
+        };
+      }
+      return f;
+    });
+
+    writeJsonFile(USER_FATWAS_FILE, updatedUserList);
+    writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
+
+    broadcastFatwaEvent({
+      type: "bulk_publish",
+      count: publishedCount,
+      timestamp: now,
+    });
+
+    res.json({
+      success: true,
+      count: publishedCount,
+      fatwas: updatedUserList.filter((f: any) => !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Infrastructure endpoint: Unpublish a single fatwa by its number
+app.post("/api/fatwas/unpublish-by-number", (req, res) => {
+  try {
+    const rawInput = String(req.body.fatwaNumber || "").trim();
+    const targetNum = Number(rawInput.replace(/[^\d]/g, ""));
+    const targetId = rawInput.toLowerCase();
+
+    if (!targetNum && !targetId) {
+      return res.status(400).json({ success: false, error: "يرجى تحديد رقم الفتوى المراد إلغاء نشرها." });
+    }
+
+    const deletedSet = readDeletedIds();
+    const userList = readJsonFile(USER_FATWAS_FILE);
+    const approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+    const now = new Date().toISOString();
+
+    let found = false;
+    let targetItem: any = null;
+
+    const updatedUserList = userList.map((f: any) => {
+      const match = (targetNum && Number(f.fatwaNumber) === targetNum) || f.id === targetId;
+      if (match && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        found = true;
+        targetItem = {
+          ...f,
+          status: "معتمدة",
+          approved: true,
+          isPublic: false,
+          updated_at: now,
+        };
+        return targetItem;
+      }
+      return f;
+    });
+
+    const updatedApprovedList = approvedList.map((f: any) => {
+      const match = (targetNum && Number(f.fatwaNumber) === targetNum) || f.id === targetId;
+      if (match && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        return {
+          ...f,
+          status: "معتمدة",
+          approved: true,
+          isPublic: false,
+          updated_at: now,
+        };
+      }
+      return f;
+    });
+
+    if (!found) {
+      return res.status(404).json({ success: false, error: `لم يتم العثور على فتوى برقم ${rawInput} في النظام.` });
+    }
+
+    writeJsonFile(USER_FATWAS_FILE, updatedUserList);
+    writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
+
+    broadcastFatwaEvent({
+      type: "unpublish_single",
+      fatwa: targetItem,
+    });
+
+    res.json({
+      success: true,
+      fatwa: targetItem,
+      fatwas: updatedUserList.filter((f: any) => !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Infrastructure endpoint: Unpublish all fatwas from readers platform
+app.post("/api/fatwas/unpublish-all", (req, res) => {
+  try {
+    const deletedSet = readDeletedIds();
+    const userList = readJsonFile(USER_FATWAS_FILE);
+    const approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+
+    const now = new Date().toISOString();
+    let unpublishedCount = 0;
+
+    const updatedUserList = userList.map((f: any) => {
+      if (f && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        if (f.status === "منشورة" || f.isPublic === true) {
+          unpublishedCount++;
+          return {
+            ...f,
+            status: "معتمدة",
+            approved: true,
+            isPublic: false,
+            updated_at: now,
+          };
+        }
+      }
+      return f;
+    });
+
+    const updatedApprovedList = approvedList.map((f: any) => {
+      if (f && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        return {
+          ...f,
+          status: "معتمدة",
+          approved: true,
+          isPublic: false,
+          updated_at: now,
+        };
+      }
+      return f;
+    });
+
+    writeJsonFile(USER_FATWAS_FILE, updatedUserList);
+    writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
+
+    broadcastFatwaEvent({
+      type: "bulk_unpublish",
+      count: unpublishedCount,
+      timestamp: now,
+    });
+
+    res.json({
+      success: true,
+      count: unpublishedCount,
+      fatwas: updatedUserList.filter((f: any) => !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -2437,6 +2791,10 @@ async function startServer() {
     ? path.join(process.cwd(), "dist")
     : process.cwd();
   
+  // Health check endpoints for deployment health checks and monitoring
+  app.get(["/health", "/_health"], (req, res) => res.status(200).send("OK"));
+  app.get("/api/health", (req, res) => res.status(200).json({ status: "ok", timestamp: new Date().toISOString() }));
+
   // تقديم sw.js دائماً برؤوس تمنع التخزين المؤقت وضمان وصول التحديث فوراً
   app.get("/sw.js", (req, res) => {
     res.set("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -2448,14 +2806,16 @@ async function startServer() {
     res.sendFile(swPath);
   });
 
-  // تحديد بيئة التشغيل: إنتاج عند تشغيل dist/server.cjs في بيئة النشر السحابي
+  // تحديد بيئة التشغيل: إنتاج عند تشغيل الخادم للنشر السحابي
   const isRunningFromDist = Boolean(process.argv[1]?.includes("dist"));
-  const isProduction = process.env.NODE_ENV === "production" || isRunningFromDist;
+  const hasDist = fs.existsSync(path.join(process.cwd(), "dist", "index.html"));
+  const isExplicitDev = process.env.npm_lifecycle_event === "dev" || (process.env.NODE_ENV === "development" && !hasDist);
+  const isProduction = !isExplicitDev && (process.env.NODE_ENV === "production" || hasDist || isRunningFromDist || process.env.npm_lifecycle_event === "start" || (Boolean(process.env.PORT) && process.env.PORT !== "3000"));
   const isDev = !isProduction;
 
   if (isDev) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);

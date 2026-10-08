@@ -27,6 +27,9 @@ import {
   BookOpen,
   RefreshCw,
   Trash2,
+  Globe,
+  EyeOff,
+  User,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Fatwa, FatwaStatus, CardTemplateSettings } from "../types";
@@ -315,16 +318,103 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
     }
   };
 
-  // Quick Approval
+  // 1. Quick Approval
   const handleApprove = () => {
+    if (!currentFatwa) return;
     setStatus("معتمدة");
-    handleSave("معتمدة");
+    let safeOrigQ = sanitizeQuestionGreeting(questionOriginal);
+    let safeCleanQ = sanitizeQuestionGreeting(questionClean || safeOrigQ);
+
+    const updated: Fatwa = {
+      ...currentFatwa,
+      question_original: safeOrigQ,
+      question_clean: safeCleanQ,
+      transcription_raw: rawAnswer,
+      answer_clean: cleanAnswer,
+      category,
+      status: "معتمدة",
+      has_wallahu_aalam: hasWallahuAalam,
+      reviewed: true,
+      approved: true,
+      isPublic: false,
+      updated_at: new Date().toISOString(),
+    };
+
+    onUpdateFatwa(updated);
+    setIsEditing(false);
     confetti({
       particleCount: 80,
       spread: 70,
       origin: { y: 0.6 },
     });
-    showToast(`تم اعتماد الفتوى #${currentFatwa?.fatwaNumber || ""} بنجاح ونقلها للأرشيف المعتمد والسيرفر المركزي`, "success");
+    showToast(`تم اعتماد الفتوى #${updated.fatwaNumber || ""} بنجاح. يمكنك الآن نشرها في واجهة القراء`, "success");
+  };
+
+  // 2. Unapprove Fatwa (إلغاء الاعتماد)
+  const handleUnapprove = () => {
+    if (!currentFatwa) return;
+    setStatus("تحتاج مراجعة");
+    const updated: Fatwa = {
+      ...currentFatwa,
+      status: "تحتاج مراجعة",
+      approved: false,
+      isPublic: false,
+      updated_at: new Date().toISOString(),
+    };
+
+    onUpdateFatwa(updated);
+    setIsEditing(false);
+    showToast(`تم إلغاء اعتماد الفتوى #${updated.fatwaNumber || ""} وإعادتها لحالة تحتاج مراجعة`, "info");
+  };
+
+  // 3. Publish to Readers Platform (نشر في واجهة القراء)
+  const handlePublish = () => {
+    if (!currentFatwa) return;
+    setStatus("منشورة");
+    let safeOrigQ = sanitizeQuestionGreeting(questionOriginal);
+    let safeCleanQ = sanitizeQuestionGreeting(questionClean || safeOrigQ);
+
+    const updated: Fatwa = {
+      ...currentFatwa,
+      question_original: safeOrigQ,
+      question_clean: safeCleanQ,
+      transcription_raw: rawAnswer,
+      answer_clean: cleanAnswer,
+      category,
+      status: "منشورة",
+      has_wallahu_aalam: hasWallahuAalam,
+      reviewed: true,
+      approved: true,
+      isPublic: true,
+      updated_at: new Date().toISOString(),
+      published_at: new Date().toISOString(),
+    };
+
+    onUpdateFatwa(updated);
+    setIsEditing(false);
+    confetti({
+      particleCount: 90,
+      spread: 70,
+      origin: { y: 0.6 },
+    });
+    showToast(`تم نشر الفتوى #${updated.fatwaNumber || ""} بنجاح وأصبحت معروضة في واجهة القراء بشكل لحظي 🌐`, "success");
+  };
+
+  // 4. Unpublish from Readers Platform (إلغاء النشر) - direct and responsive without window.confirm
+  const handleUnpublish = () => {
+    if (!currentFatwa) return;
+    setStatus("معتمدة");
+    const updated: Fatwa = {
+      ...currentFatwa,
+      status: "معتمدة",
+      approved: true,
+      isPublic: false,
+      updated_at: new Date().toISOString(),
+    };
+
+    onUpdateFatwa(updated);
+    setIsEditing(false);
+    showToast(`تم إلغاء نشر الفتوى #${updated.fatwaNumber || ""} وسحبها من واجهة القراء مع بقائها معتمدة بالأرشيف 🚫`, "info");
   };
 
   // Copy helpers
@@ -495,17 +585,22 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
               فتوى #{currentFatwa.fatwaNumber}
             </span>
             <span
-              className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                status === "معتمدة"
-                  ? "bg-emerald-600 text-white"
-                  : status === "منشورة"
-                  ? "bg-teal-600 text-white"
+              className={`px-2.5 py-0.5 rounded-full text-xs font-bold inline-flex items-center gap-1 ${
+                status === "منشورة" || (status === "معتمدة" && currentFatwa.approved !== false)
+                  ? "bg-teal-600 text-white ring-2 ring-teal-400/30"
                   : status === "تحتاج مراجعة"
                   ? "bg-amber-100 text-amber-900 border border-amber-300"
                   : "bg-stone-100 text-stone-700"
               }`}
             >
-              الحالة: {status}
+              {status === "منشورة" || (status === "معتمدة" && currentFatwa.approved !== false) ? (
+                <>
+                  <Globe className="w-3 h-3 text-amber-300" />
+                  <span>معروضة في واجهة القراء 🌐</span>
+                </>
+              ) : (
+                <span>غير منشورة (قيد المراجعة)</span>
+              )}
             </span>
             {currentFatwa.tags?.includes("مستورد من Word") && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
@@ -516,6 +611,17 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
             {currentFatwa.audio_file?.name && (
               <span className="hidden sm:inline-block text-xs text-stone-500 bg-stone-50 px-2 py-0.5 rounded border border-stone-200 truncate max-w-[200px]">
                 {currentFatwa.audio_file.name}
+              </span>
+            )}
+            {(currentFatwa.transcriber_name || currentFatwa.transcriber_group) && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-950 border border-emerald-300 shadow-2xs">
+                <User className="w-3 h-3 text-emerald-700" />
+                <span>المفرّغ: {currentFatwa.transcriber_name || "غير محدد"}</span>
+                {currentFatwa.transcriber_group && (
+                  <span className="font-mono text-amber-900 bg-amber-100/90 px-1.5 rounded">
+                    مجموعة #{currentFatwa.transcriber_group}
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -602,31 +708,83 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
             <span>حذف الفتوى</span>
           </button>
 
-          {status === "معتمدة" || status === "منشورة" || currentFatwa.approved ? (
-            <div className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5">
-              <span className="w-full flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>معتمدة بالأرشيف</span>
-              </span>
+          {/* الحالة الأولى: الفتوى غير معتمدة بعد -> يظهر فقط زر اعتماد الفتوى */}
+          {status !== "معتمدة" && status !== "منشورة" && !currentFatwa.approved ? (
+            <button
+              type="button"
+              id="review-approve-btn"
+              onClick={handleApprove}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold font-cairo bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer active:scale-95"
+            >
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>اعتماد الفتوى</span>
+            </button>
+          ) : (
+            /* الحالة الثانية: الفتوى تم اعتمادها -> يظهر زر إلغاء الاعتماد وجنبه زر النشر أو إلغاء النشر */
+            <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5 flex-wrap">
+              {/* زر إلغاء الاعتماد */}
+              <button
+                type="button"
+                id="review-unapprove-btn"
+                onClick={handleUnapprove}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold font-cairo bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                title="إلغاء اعتماد الفتوى وإعادتها لحالة تحتاج مراجعة"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                <span>إلغاء الاعتماد</span>
+              </button>
+
+              {/* جنب زر إلغاء الاعتماد: زر النشر أو إلغاء النشر من واجهة القراء */}
+              {status === "منشورة" ? (
+                <button
+                  type="button"
+                  id="review-unpublish-btn"
+                  onClick={handleUnpublish}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold font-cairo bg-amber-50 hover:bg-rose-50 text-amber-900 hover:text-rose-800 border border-amber-300 hover:border-rose-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                  title="إلغاء نشر هذه الفتوى وسحبها فوراً وبشكل لحظي من واجهة القراء"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  <span>إلغاء النشر 🚫</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  id="review-publish-btn"
+                  onClick={handlePublish}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold font-cairo bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-900/20 border border-emerald-500/50 transition-all cursor-pointer active:scale-95 animate-pulse hover:animate-none"
+                  title="نشر هذه الفتوى المعتمدة لتظهر فوراً في واجهة القراء والبحث العام بشكل لحظي"
+                >
+                  <Globe className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>نشر في واجهة القراء 🌐</span>
+                </button>
+              )}
+
+              {/* معاينة في واجهة القراء إن كانت منشورة */}
+              {status === "منشورة" && (
+                <a
+                  href={`/fatwa/${currentFatwa.id || currentFatwa.fatwaNumber}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold font-cairo bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 shadow-2xs transition-all"
+                  title="معاينة الفتوى في واجهة القراء الحية"
+                >
+                  <Eye className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                  <span className="hidden md:inline">عرض عند القراء</span>
+                </a>
+              )}
+
               {onNavigateToArchive && (
                 <button
+                  type="button"
                   onClick={onNavigateToArchive}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white shadow-xs transition-all cursor-pointer active:scale-95"
-                  title="الانتقال إلى أرشيف الفتاوى لعرضها وتصديرها"
+                  className="flex items-center justify-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white shadow-xs transition-all cursor-pointer active:scale-95"
+                  title="الانتقال إلى أرشيف الفتاوى"
                 >
                   <BookOpen className="w-3.5 h-3.5 shrink-0" />
                   <span>الأرشيف</span>
                 </button>
               )}
             </div>
-          ) : (
-            <button
-              onClick={handleApprove}
-              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer active:scale-95"
-            >
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>اعتماد الفتوى</span>
-            </button>
           )}
 
           <button
