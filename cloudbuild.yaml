@@ -1,0 +1,37 @@
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud artifacts repositories describe khilla --location=europe-west1 >/dev/null 2>&1 || \
+        gcloud artifacts repositories create khilla --repository-format=docker --location=europe-west1 --description="Khilla images"
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla:$SHORT_SHA
+      - -t
+      - europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla:live
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - khilla
+      - --image=europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla:$SHORT_SHA
+      - --region=europe-west1
+      - --port=8080
+      - --memory=2Gi
+      - --cpu=1
+      - --timeout=300
+      - --allow-unauthenticated
+      - --quiet
+options:
+  logging: CLOUD_LOGGING_ONLY
