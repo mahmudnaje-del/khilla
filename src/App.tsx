@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Header } from "./components/Header";
 import { TranscribeWorkspace } from "./components/TranscribeWorkspace";
@@ -13,6 +13,8 @@ import { FatwaArchive } from "./components/FatwaArchive";
 import { DashboardStats } from "./components/DashboardStats";
 import { DeveloperPage } from "./components/DeveloperPage";
 import { AdminPortal } from "./components/AdminPortal";
+import { PublishingCenter } from "./components/PublishingCenter";
+import { PageSkeletonLoader } from "./components/PageSkeletonLoader";
 import PWADiagnostics from "./components/PWADiagnostics";
 import { AuthModal } from "./components/AuthModal";
 import { isEditorAuthorized, revokeEditorAuthorization } from "./utils/editorAuth";
@@ -71,7 +73,7 @@ export default function App() {
   const adminTarget = adminDestination(pathOnly);
 
   const [activeTab, setActiveTab] = useState<
-    "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin"
+    "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin" | "publish"
   >(() => {
     if (!adminMode) return "stats";
     return adminTarget === "reports" || adminTarget === "sync" ? "stats" : adminTarget;
@@ -93,6 +95,16 @@ export default function App() {
   const [pendingWritesCount, setPendingWritesCount] = useState<number>(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [detailsModalFatwa, setDetailsModalFatwa] = useState<Fatwa | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
+  const transitionTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleOpenAdmin = () => {
     if (isEditorAuthorized()) {
@@ -1086,7 +1098,54 @@ export default function App() {
   );
   const pendingReviewCount = pendingReviewFatwas.length;
 
-  const handleTabChange = (tab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin") => {
+  // Approved awaiting publish count
+  const approvedPendingPublishFatwas = fatwas.filter(
+    (f) =>
+      !isFatwaDeleted(f.id, f.fatwaNumber) &&
+      (f.status === "معتمدة" || f.approved) &&
+      f.status !== "منشورة" &&
+      (f as any).isPublic !== true
+  );
+  const approvedPendingPublishCount = approvedPendingPublishFatwas.length;
+
+  // Publish a single fatwa
+  const handlePublishSingleFatwa = async (fatwaId: string) => {
+    const now = new Date().toISOString();
+    let publishedItem: Fatwa | null = null;
+    setFatwas((prev) => {
+      const updated = prev.map((f) => {
+        if (f.id === fatwaId) {
+          publishedItem = {
+            ...f,
+            status: "منشورة" as const,
+            approved: true,
+            isPublic: true,
+            published_at: f.published_at || now,
+            updated_at: now,
+            pendingSync: true,
+          };
+          return publishedItem;
+        }
+        return f;
+      });
+      saveFatwasToStorage(updated);
+      return updated;
+    });
+
+    if (publishedItem) {
+      await handleUpdateFatwa(publishedItem);
+    }
+  };
+
+  const handleTabChange = (tab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin" | "publish") => {
+    if (tab === activeTab) return;
+
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+    }
+    // Show custom skeleton screen during transition to eliminate any white flash
+    setIsTransitioning(true);
+
     if (tab === "review") {
       if (!currentFatwa || currentFatwa.approved || currentFatwa.status === "معتمدة" || currentFatwa.status === "منشورة") {
         if (pendingReviewFatwas.length > 0) {
@@ -1100,6 +1159,11 @@ export default function App() {
       window.history.pushState(null, "", next);
       setHref(next);
     }
+
+    // Brief smooth transition to reveal loaded tab seamlessly
+    transitionTimerRef.current = setTimeout(() => {
+      setIsTransitioning(false);
+    }, 280);
   };
 
   const showDiagnostics = new URLSearchParams(window.location.search).get("diag") === "1";
@@ -1191,6 +1255,7 @@ export default function App() {
         setIsAuthModalOpen={setIsAuthModalOpen}
         onNewFatwa={handleStartNewFatwa}
         pendingReviewCount={pendingReviewCount}
+        pendingPublishCount={approvedPendingPublishCount}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         showToast={showToast}
         isFirestoreConnected={isFirestoreConnected}
@@ -1207,6 +1272,16 @@ export default function App() {
             <AdminReportsPanel />
           ) : adminTarget === "sync" ? (
             <AdminSyncPanel syncStatus={syncStatus} pendingWrites={pendingWritesCount} />
+          ) : isTransitioning ? (
+            <motion.div
+              key="skeleton-screen"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.1 }}
+            >
+              <PageSkeletonLoader activeTab={activeTab} />
+            </motion.div>
           ) : (
           <AnimatePresence mode="wait">
             {activeTab === "transcribe" && (
@@ -1328,10 +1403,38 @@ export default function App() {
                     setActiveTab("review");
                   }}
                   onOpenArchive={() => setActiveTab("archive")}
+                  onOpenPublishingCenter={() => setActiveTab("publish")}
                   onPublishAllApproved={handleBatchPublishApproved}
                   onUnpublishFatwaByNumber={handleUnpublishFatwaByNumber}
                   onUnpublishAllFatwas={handleUnpublishAllFatwas}
                   isPublishSyncing={isPublishSyncing}
+                  showToast={showToast}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "publish" && (
+              <motion.div
+                key="publish"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.15 }}
+              >
+                <PublishingCenter
+                  fatwas={fatwas}
+                  onUpdateFatwa={handleUpdateFatwa}
+                  onPublishFatwa={handlePublishSingleFatwa}
+                  onUnpublishFatwa={handleUnpublishFatwaByNumber}
+                  onPublishAllApproved={handleBatchPublishApproved}
+                  onNavigateToCard={(f) => {
+                    setCurrentFatwa(f);
+                    setActiveTab("card");
+                  }}
+                  onNavigateToReview={(f) => {
+                    setCurrentFatwa(f);
+                    setActiveTab("review");
+                  }}
                   showToast={showToast}
                 />
               </motion.div>

@@ -26,6 +26,7 @@ interface DashboardStatsProps {
   onNewFatwa: () => void;
   onFilterNeedsReview: () => void;
   onOpenArchive: () => void;
+  onOpenPublishingCenter?: () => void;
   onPublishAllApproved?: () => Promise<void>;
   onUnpublishFatwaByNumber?: (rawNumber: string | number) => Promise<boolean>;
   onUnpublishAllFatwas?: () => Promise<void>;
@@ -38,6 +39,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   onNewFatwa,
   onFilterNeedsReview,
   onOpenArchive,
+  onOpenPublishingCenter,
   onPublishAllApproved,
   onUnpublishFatwaByNumber,
   onUnpublishAllFatwas,
@@ -220,6 +222,18 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
 
           {/* Action buttons */}
           <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Button 0: فتح مركز النشر والاعتماد */}
+            {onOpenPublishingCenter && (
+              <button
+                type="button"
+                onClick={onOpenPublishingCenter}
+                className="px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold font-cairo text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+              >
+                <Send className="w-4 h-4 text-stone-950" />
+                <span>مركز النشر والاعتماد</span>
+              </button>
+            )}
+
             {/* Button 1: نشر جميع الفتاوى المعتمدة */}
             <button
               type="button"

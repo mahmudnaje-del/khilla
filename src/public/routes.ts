@@ -1,4 +1,4 @@
-export type AdminTab = "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin";
+export type AdminTab = "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin" | "publish";
 export type AdminExtra = "reports" | "sync";
 
 export function isShareLaunch(search = typeof window === "undefined" ? "" : window.location.search): boolean {
@@ -13,6 +13,7 @@ export function ensureShareLandsInAdmin(): void {
 }
 
 export function adminDestination(path: string): AdminTab | AdminExtra {
+  if (path.startsWith("/admin/publish") || path.startsWith("/admin/publishing-center")) return "publish";
   if (path.startsWith("/admin/transcribe")) return "transcribe";
   if (path.startsWith("/admin/review")) return "review";
   if (path.startsWith("/admin/fatwas")) return "archive";
@@ -25,6 +26,7 @@ export function adminDestination(path: string): AdminTab | AdminExtra {
 }
 
 export function pathForTab(tab: AdminTab): string {
+  if (tab === "publish") return "/admin/publish";
   if (tab === "transcribe") return "/admin/transcribe";
   if (tab === "review") return "/admin/review";
   if (tab === "archive") return "/admin/fatwas";

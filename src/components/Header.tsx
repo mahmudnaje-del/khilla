@@ -20,19 +20,21 @@ import {
   KeyRound,
   Sparkles,
   RefreshCw,
+  Send,
 } from "lucide-react";
 import { loginAdmin, setAdminSession } from "../utils/adminApi";
 import { EDITOR_AUTH_KEY } from "../utils/editorAuth";
 
 interface HeaderProps {
-  activeTab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin";
-  setActiveTab: (tab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin") => void;
+  activeTab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin" | "publish";
+  setActiveTab: (tab: "transcribe" | "review" | "card" | "archive" | "stats" | "developer" | "admin" | "publish") => void;
   strictMode: boolean;
   setStrictMode: (val: boolean) => void;
   isAuthenticated: boolean;
   setIsAuthModalOpen: (val: boolean) => void;
   onNewFatwa: () => void;
   pendingReviewCount: number;
+  pendingPublishCount?: number;
   onOpenInstallModal?: () => void;
   onFetchAllUserFatwas?: () => Promise<void>;
   isFetchingAllUsersFatwas?: boolean;
@@ -51,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
   setIsAuthModalOpen,
   onNewFatwa,
   pendingReviewCount,
+  pendingPublishCount = 0,
   onOpenInstallModal,
   onFetchAllUserFatwas,
   isFetchingAllUsersFatwas,
@@ -67,6 +70,13 @@ export const Header: React.FC<HeaderProps> = ({
       label: "لوحة التحكم",
       subLabel: "Dashboard",
       icon: Layers,
+    },
+    {
+      id: "publish" as const,
+      label: "إدارة النشر",
+      subLabel: "Publishing Hub",
+      icon: Send,
+      badge: pendingPublishCount > 0 ? pendingPublishCount : undefined,
     },
     {
       id: "transcribe" as const,
@@ -545,7 +555,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0c392c]/95 backdrop-blur-md border-t border-emerald-900/80 px-2 py-2 shadow-2xl safe-area-pb">
         <div className="grid grid-cols-5 gap-1 max-w-md mx-auto">
           {navItems
-            .filter((item) => item.id !== "developer" && item.id !== "admin")
+            .filter((item) => ["stats", "transcribe", "review", "publish", "archive"].includes(item.id))
             .map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -572,8 +582,8 @@ export const Header: React.FC<HeaderProps> = ({
                       ? "تفريغ"
                       : item.id === "review"
                       ? "المراجعة"
-                      : item.id === "card"
-                      ? "القوالب"
+                      : item.id === "publish"
+                      ? "النشر"
                       : item.id === "archive"
                       ? "الأرشيف"
                       : "اللوحة"}
