@@ -29,7 +29,7 @@ steps:
         apt-get update -qq
         apt-get install -y -qq python3-yaml >/dev/null
         gcloud run services describe service --region=europe-west1 --format=export > /tmp/svc.yaml
-        IMAGE="$IMAGE" python3 - << 'PY'
+        IMAGE="$$IMAGE" python3 - << 'PY'
         import os, yaml
         image = os.environ["IMAGE"]
         with open("/tmp/svc.yaml") as f:
