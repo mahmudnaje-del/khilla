@@ -20,18 +20,42 @@ steps:
       - --all-tags
       - europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - khilla
-      - --image=europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla:$SHORT_SHA
-      - --region=europe-west1
-      - --port=8080
-      - --memory=2Gi
-      - --cpu=1
-      - --timeout=300
-      - --allow-unauthenticated
-      - --quiet
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE="europe-west1-docker.pkg.dev/$PROJECT_ID/khilla/khilla:$SHORT_SHA"
+        apt-get update -qq
+        apt-get install -y -qq python3-yaml >/dev/null
+        gcloud run services describe service --region=europe-west1 --format=export > /tmp/svc.yaml
+        IMAGE="$IMAGE" python3 - << 'PY'
+        import os, yaml
+        image = os.environ["IMAGE"]
+        with open("/tmp/svc.yaml") as f:
+            s = yaml.safe_load(f)
+        s.pop("status", None)
+        t = s["spec"]["template"]
+        meta = t.setdefault("metadata", {})
+        meta.pop("name", None)
+        ann = meta.get("annotations")
+        if not isinstance(ann, dict):
+            ann = {}
+        ann.pop("run.googleapis.com/sources", None)
+        ann.pop("run.googleapis.com/base-images", None)
+        ann["client.knative.dev/user-image"] = image
+        meta["annotations"] = ann
+        spec = t.setdefault("spec", {})
+        spec.pop("runtimeClassName", None)
+        c = spec["containers"][0]
+        c["image"] = image
+        c.pop("command", None)
+        c.pop("args", None)
+        s["spec"]["traffic"] = [{"latestRevision": True, "percent": 100}]
+        with open("/tmp/svc.yaml", "w") as f:
+            yaml.safe_dump(s, f, sort_keys=False)
+        print("patched", image)
+        PY
+        gcloud run services replace /tmp/svc.yaml --region=europe-west1
 options:
   logging: CLOUD_LOGGING_ONLY
