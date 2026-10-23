@@ -58,6 +58,8 @@ interface ReviewModalOrTabProps {
   onDeleteFatwa?: (id: string) => void;
   onFetchAllUserFatwas?: () => Promise<void> | void;
   isFetchingAllUsersFatwas?: boolean;
+  isSupervisorPublisher?: boolean;
+  onOpenSupervisorUpgradeModal?: () => void;
 }
 
 export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
@@ -74,6 +76,8 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
   onDeleteFatwa,
   onFetchAllUserFatwas,
   isFetchingAllUsersFatwas = false,
+  isSupervisorPublisher = false,
+  onOpenSupervisorUpgradeModal,
 }) => {
   // Editing state
   const [isEditing, setIsEditing] = useState(false);
@@ -370,6 +374,11 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
   // 3. Publish to Readers Platform (نشر في واجهة القراء)
   const handlePublish = () => {
     if (!currentFatwa) return;
+    if (!isSupervisorPublisher) {
+      showToast("نشر الفتوى للعامة مخصص للمشرف الناشر فقط. يرجى إدخال كلمة سر المشرف للترقية وفتح النشر.", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setStatus("منشورة");
     let safeOrigQ = sanitizeQuestionGreeting(questionOriginal);
     let safeCleanQ = sanitizeQuestionGreeting(questionClean || safeOrigQ);
@@ -388,6 +397,7 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
       isPublic: true,
       updated_at: new Date().toISOString(),
       published_at: new Date().toISOString(),
+      publisher: "مشرف ناشر معتمد",
     };
 
     onUpdateFatwa(updated);
@@ -403,6 +413,11 @@ export const ReviewModalOrTab: React.FC<ReviewModalOrTabProps> = ({
   // 4. Unpublish from Readers Platform (إلغاء النشر) - direct and responsive without window.confirm
   const handleUnpublish = () => {
     if (!currentFatwa) return;
+    if (!isSupervisorPublisher) {
+      showToast("إلغاء نشر الفتوى وسحبها مخصص للمشرف الناشر فقط. يرجى إدخال كلمة سر المشرف.", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setStatus("معتمدة");
     const updated: Fatwa = {
       ...currentFatwa,

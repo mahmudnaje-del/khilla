@@ -957,6 +957,116 @@ export async function batchSaveFatwasToFirestore(
 }
 
 /**
+ * Directly publishes a single fatwa in Cloud Firestore with status: "منشورة" and isPublic: true
+ */
+export async function publishSingleFatwaInCloud(
+  fatwa: Fatwa,
+  publisherName = "المشرف المعتمد"
+): Promise<{ success: boolean; version: number; fatwa: Fatwa }> {
+  const now = new Date().toISOString();
+  const toSave: Fatwa = {
+    ...fatwa,
+    status: "منشورة",
+    approved: true,
+    isPublic: true,
+    published_at: fatwa.published_at || now,
+    updated_at: now,
+    publisher: publisherName,
+  };
+
+  const res = await saveFatwaToFirestore(toSave, fatwa.version);
+  return {
+    success: true,
+    version: res.version,
+    fatwa: { ...toSave, version: res.version, updated_at: res.updated_at },
+  };
+}
+
+/**
+ * Directly unpublishes a single fatwa from Cloud Firestore, setting status: "معتمدة" and isPublic: false
+ */
+export async function unpublishSingleFatwaInCloud(
+  fatwa: Fatwa
+): Promise<{ success: boolean; version: number; fatwa: Fatwa }> {
+  const now = new Date().toISOString();
+  const toSave: Fatwa = {
+    ...fatwa,
+    status: "معتمدة",
+    approved: true,
+    isPublic: false,
+    updated_at: now,
+  };
+
+  const res = await saveFatwaToFirestore(toSave, fatwa.version);
+  return {
+    success: true,
+    version: res.version,
+    fatwa: { ...toSave, version: res.version, updated_at: res.updated_at },
+  };
+}
+
+/**
+ * Batch publishes all approved fatwas directly in Cloud Firestore
+ */
+export async function batchPublishFatwasInCloud(
+  fatwas: Fatwa[],
+  publisherName = "المشرف المعتمد"
+): Promise<{ success: boolean; succeeded: number; failed: number }> {
+  const now = new Date().toISOString();
+  const toPublish = fatwas
+    .filter((f) => !f.deleted && (f.status === "معتمدة" || f.approved || f.status === "منشورة"))
+    .map((f) => ({
+      ...f,
+      status: "منشورة" as const,
+      approved: true,
+      isPublic: true,
+      published_at: f.published_at || now,
+      updated_at: now,
+      publisher: publisherName,
+    }));
+
+  if (toPublish.length === 0) {
+    return { success: true, succeeded: 0, failed: 0 };
+  }
+
+  const res = await batchSaveFatwasToFirestore(toPublish);
+  return {
+    success: res.success,
+    succeeded: res.succeeded,
+    failed: res.failed,
+  };
+}
+
+/**
+ * Batch unpublishes all published fatwas directly in Cloud Firestore
+ */
+export async function batchUnpublishFatwasInCloud(
+  fatwas: Fatwa[]
+): Promise<{ success: boolean; succeeded: number; failed: number }> {
+  const now = new Date().toISOString();
+  const toUnpublish = fatwas
+    .filter((f) => !f.deleted && (f.status === "منشورة" || (f as any).isPublic === true))
+    .map((f) => ({
+      ...f,
+      status: "معتمدة" as const,
+      approved: true,
+      isPublic: false,
+      updated_at: now,
+    }));
+
+  if (toUnpublish.length === 0) {
+    return { success: true, succeeded: 0, failed: 0 };
+  }
+
+  const res = await batchSaveFatwasToFirestore(toUnpublish);
+  return {
+    success: res.success,
+    succeeded: res.succeeded,
+    failed: res.failed,
+  };
+}
+
+/**
  * Uploads user fatwas from local state (Archive and Review) that are missing or newer than Firestore documents.
  */
 export async function uploadUserFatwasToFirestore(

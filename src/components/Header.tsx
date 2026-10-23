@@ -42,6 +42,8 @@ interface HeaderProps {
   isFirestoreConnected?: boolean;
   syncStatus?: "initializing" | "connecting" | "synced" | "offline" | "error" | "permission-denied" | "quota-exceeded";
   pendingWritesCount?: number;
+  isSupervisorPublisher?: boolean;
+  onOpenSupervisorUpgradeModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -61,6 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
   isFirestoreConnected = true,
   syncStatus = "synced",
   pendingWritesCount = 0,
+  isSupervisorPublisher = false,
+  onOpenSupervisorUpgradeModal,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -279,6 +283,33 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+
+          {/* Supervisor Publishing Upgrade Button or Status */}
+          {isSupervisorPublisher ? (
+            <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs bg-emerald-900/40 border border-emerald-500/40 text-emerald-200 shadow-inner">
+              <span className="flex items-center gap-1.5 font-bold">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>مشرف ناشر معتمد</span>
+              </span>
+              <span className="text-[9px] bg-emerald-700/60 text-emerald-200 px-1 py-0.2 rounded font-mono font-bold">
+                Firestore Live
+              </span>
+            </div>
+          ) : onOpenSupervisorUpgradeModal ? (
+            <button
+              type="button"
+              onClick={onOpenSupervisorUpgradeModal}
+              className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 transition-colors font-bold font-cairo cursor-pointer active:scale-98"
+            >
+              <span className="flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span>ترقية المشرف (فتح النشر)</span>
+              </span>
+              <span className="text-[9px] bg-amber-400 text-stone-950 px-1.5 py-0.2 rounded font-bold font-tajawal">
+                طلب كلمة السر
+              </span>
+            </button>
+          ) : null}
 
           {/* Auth Gate Button */}
           <button

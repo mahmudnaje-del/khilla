@@ -17,6 +17,9 @@ import {
   EyeOff,
   Hash,
   X,
+  KeyRound,
+  Unlock,
+  Lock,
 } from "lucide-react";
 import { Fatwa } from "../types";
 import { formatDuration } from "../utils/audioHelper";
@@ -31,6 +34,8 @@ interface DashboardStatsProps {
   onUnpublishFatwaByNumber?: (rawNumber: string | number) => Promise<boolean>;
   onUnpublishAllFatwas?: () => Promise<void>;
   isPublishSyncing?: boolean;
+  isSupervisorPublisher?: boolean;
+  onOpenSupervisorUpgradeModal?: () => void;
   showToast?: (msg: string, type?: "success" | "error" | "info") => void;
 }
 
@@ -44,6 +49,8 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   onUnpublishFatwaByNumber,
   onUnpublishAllFatwas,
   isPublishSyncing = false,
+  isSupervisorPublisher = false,
+  onOpenSupervisorUpgradeModal,
   showToast,
 }) => {
   const [isUnpublishModalOpen, setIsUnpublishModalOpen] = useState(false);
@@ -72,6 +79,11 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   const totalAudioSeconds = activeFatwas.reduce((acc, f) => acc + (f.audio_file?.duration || 0), 0);
 
   const handlePublishAllApprovedAction = async () => {
+    if (!isSupervisorPublisher) {
+      showToast?.("يلزم ترقية حساب المشرف وإدخال كلمة السر لفتح صلاحيات النشر والإلغاء في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     if (onPublishAllApproved) {
       await onPublishAllApproved();
       return;
@@ -94,6 +106,11 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
 
   const handleUnpublishSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isSupervisorPublisher) {
+      showToast?.("يلزم ترقية حساب المشرف وإدخال كلمة السر لفتح صلاحيات النشر والإلغاء في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     const raw = unpublishNumberInput.trim();
     if (!raw) return;
 
@@ -128,6 +145,11 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   };
 
   const handleExecuteUnpublishAll = async () => {
+    if (!isSupervisorPublisher) {
+      showToast?.("يلزم ترقية حساب المشرف وإدخال كلمة السر لفتح صلاحيات النشر والإلغاء في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setIsSubmittingUnpublishAll(true);
     try {
       if (onUnpublishAllFatwas) {
@@ -222,11 +244,44 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
 
           {/* Action buttons */}
           <div className="flex items-center gap-2.5 flex-wrap">
+            {/* زر ترقية حساب المشرف */}
+            {!isSupervisorPublisher ? (
+              <button
+                type="button"
+                id="dashboard-upgrade-supervisor-btn"
+                onClick={onOpenSupervisorUpgradeModal}
+                className="px-4 py-3 rounded-xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-stone-950 font-extrabold font-cairo text-xs sm:text-sm shadow-lg shadow-amber-500/25 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer border-2 border-amber-200"
+                title="ترقية حساب المشرف بإدخال كلمة السر لفتح صلاحيات النشر والإلغاء المباشر في فايرستور"
+              >
+                <KeyRound className="w-4 h-4 text-stone-950" />
+                <span>ترقية حساب المشرف (فتح النشر)</span>
+              </button>
+            ) : (
+              <div
+                className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs font-cairo font-bold cursor-default shadow-inner"
+                title="تم التحقق من كلمة السر وصلاحيات النشر مفعلة بالكامل"
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+                <ShieldCheck className="w-4 h-4 text-emerald-300" />
+                <span>مشرف ناشر معتمد ✅</span>
+              </div>
+            )}
+
             {/* Button 0: فتح مركز النشر والاعتماد */}
             {onOpenPublishingCenter && (
               <button
                 type="button"
-                onClick={onOpenPublishingCenter}
+                onClick={() => {
+                  if (!isSupervisorPublisher) {
+                    showToast?.("يلزم ترقية حساب المشرف أولاً وإدخال كلمة السر لفتح مركز النشر", "info");
+                    onOpenSupervisorUpgradeModal?.();
+                    return;
+                  }
+                  onOpenPublishingCenter();
+                }}
                 className="px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold font-cairo text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
               >
                 <Send className="w-4 h-4 text-stone-950" />
