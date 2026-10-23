@@ -43,6 +43,8 @@ export interface Fatwa {
   approved_at?: string;
   isPublic?: boolean;
   published_at?: string;
+  publisher?: string;
+  published_by?: string;
   has_wallahu_aalam: boolean;
   category?: string;
   tags?: string[];

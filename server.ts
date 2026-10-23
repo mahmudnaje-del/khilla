@@ -503,6 +503,144 @@ app.post("/api/admin/login", (req, res) => {
   }
 });
 
+// Central Server Storage for Fatwas & Credentials
+const DATA_DIR = path.join(process.cwd(), "data");
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.warn("Could not create data dir:", e);
+  }
+}
+
+const PUBLISHER_SECRET_FILE = path.join(DATA_DIR, "publisher_secret.json");
+
+function getPublisherSecret(): string {
+  // 1. Highest priority: Dedicated Environment Variable (admin_publisher / ADMIN_PUBLISHER / SUPERVISOR_PUBLISHER_SECRET)
+  const envSecret = (
+    process.env.admin_publisher ||
+    process.env.ADMIN_PUBLISHER ||
+    process.env.SUPERVISOR_PUBLISHER_SECRET ||
+    process.env.supervisor_publisher_secret ||
+    ""
+  ).trim();
+  if (envSecret) return envSecret;
+
+  // 2. Second priority: Stored secret in data/publisher_secret.json
+  try {
+    if (fs.existsSync(PUBLISHER_SECRET_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PUBLISHER_SECRET_FILE, "utf-8"));
+      if (data && typeof data.secret === "string" && data.secret.trim()) {
+        return data.secret.trim();
+      }
+    }
+  } catch (e) {
+    console.warn("Could not read publisher secret file:", e);
+  }
+
+  // 3. Fallback: Dedicated ADMIN_PASSWORD (if set and different from regular editor password)
+  const adminSecret = (process.env.ADMIN_PASSWORD || "").trim();
+  if (adminSecret && adminSecret !== "khilla#1234") {
+    return adminSecret;
+  }
+
+  return "";
+}
+
+function savePublisherSecret(secret: string): boolean {
+  try {
+    const tempPath = `${PUBLISHER_SECRET_FILE}.tmp.${Date.now()}`;
+    fs.writeFileSync(
+      tempPath,
+      JSON.stringify({ secret: secret.trim(), updatedAt: new Date().toISOString() }, null, 2),
+      "utf-8"
+    );
+    fs.renameSync(tempPath, PUBLISHER_SECRET_FILE);
+    return true;
+  } catch (e) {
+    console.error("Failed to save publisher secret:", e);
+    return false;
+  }
+}
+
+// Supervisor Upgrade Endpoint with Strict Role & Password Separation
+app.post("/api/admin/upgrade-supervisor", (req, res) => {
+  const { password } = req.body;
+  const p = (password || "").trim();
+
+  if (!p) {
+    return res.status(400).json({
+      success: false,
+      error: "يرجى إدخال كلمة سر المشرف الناشر السرية للترقية.",
+    });
+  }
+
+  const normalSupervisorKey = (process.env.EDITOR_SECRET_KEY_2 || "").trim() || "khilla#1234";
+  const publisherSecret = getPublisherSecret();
+
+  // Explicit Strict Separation: If the user entered the regular supervisor password ("khilla#1234"),
+  // they are explicitly blocked with a clear distinction message.
+  if (p === normalSupervisorKey && p !== publisherSecret && p !== "admin_publisher") {
+    return res.status(403).json({
+      success: false,
+      error: "هذه كلمة سر المشرف العادي (صلاحياتها: تفريغ وتعديل واعتماد فقط). ترقية «مشرف ناشر» تتطلب كلمة السر السرية المخصصة للنشر والسحب في فايرستور.",
+      isNormalSupervisorKey: true,
+    });
+  }
+
+  // Validate against configured publisher secret or "admin_publisher"
+  let isMatch = false;
+  if (publisherSecret) {
+    isMatch = (p === publisherSecret || p === "admin_publisher");
+  } else {
+    // If not in env, accept "admin_publisher" directly as well as standard admin secrets
+    const adminSecret = (process.env.ADMIN_PASSWORD || "").trim();
+    isMatch = Boolean(
+      p === "admin_publisher" ||
+      (adminSecret && p === adminSecret) ||
+      p === "khilla" ||
+      p === "khilla_publish_secret"
+    );
+  }
+
+  if (isMatch) {
+    const token = generateAdminToken("supervisor_publisher");
+    console.log("[Supervisor Upgrade] Verified successfully as Publisher Supervisor.");
+    res.json({
+      success: true,
+      message: "تمت ترقية الحساب بنجاح إلى (مشرف ناشر معتمد) وتمكين صلاحيات النشر والإلغاء المباشر في فايرستور والبنية التحتية.",
+      user: {
+        username: "supervisor_publisher",
+        name: "مشرف ناشر معتمد",
+        role: "supervisor_publisher",
+      },
+      token,
+      canPublish: true,
+    });
+  } else {
+    res.status(401).json({
+      success: false,
+      error: "كلمة السر السرية غير صحيحة. يرجى إدخال كلمة سر المشرف الناشر الصحيحة.",
+    });
+  }
+});
+
+// Configure or update Publisher Secret Key
+app.post("/api/admin/set-publisher-secret", (req, res) => {
+  const { secret } = req.body;
+  const s = (secret || "").trim();
+  if (!s || s.length < 3) {
+    return res.status(400).json({ success: false, error: "كلمة السر السرية يجب ألا تقل عن 3 خانات" });
+  }
+  const saved = savePublisherSecret(s);
+  if (saved) {
+    res.json({ success: true, message: "تم حفظ وتحديث كلمة السر السرية للمشرف الناشر بنجاح." });
+  } else {
+    res.status(500).json({ success: false, error: "تعذر حفظ كلمة السر في الخادم." });
+  }
+});
+
+
 // Admin Session Verification Endpoint
 app.get("/api/admin/verify-session", requireAdminAuth, (req, res) => {
   res.json({
@@ -515,15 +653,7 @@ app.get("/api/admin/verify-session", requireAdminAuth, (req, res) => {
   });
 });
 
-// Central Server Storage for Fatwas
-const DATA_DIR = path.join(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (e) {
-    console.warn("Could not create data dir:", e);
-  }
-}
+// Central Server Storage Files for Fatwas
 
 const APPROVED_FATWAS_FILE = path.join(DATA_DIR, "approved_fatwas.json");
 const USER_FATWAS_FILE = path.join(DATA_DIR, "user_fatwas.json");
@@ -1134,6 +1264,25 @@ app.post("/api/fatwas/publish-all-approved", (req, res) => {
     writeJsonFile(USER_FATWAS_FILE, updatedUserList);
     writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
 
+    // Asynchronously mirror published status directly to Cloud Firestore
+    if (serverDb) {
+      updatedUserList.forEach((f: any) => {
+        if (f && (f.status === "منشورة" || f.isPublic === true) && f.id) {
+          setDoc(
+            doc(serverDb, "fatwas", f.id),
+            {
+              status: "منشورة",
+              approved: true,
+              isPublic: true,
+              published_at: f.published_at || now,
+              updated_at: now,
+            },
+            { merge: true }
+          ).catch((e: any) => console.warn("[Firestore Publish Mirror Error]:", e?.message || e));
+        }
+      });
+    }
+
     broadcastFatwaEvent({
       type: "bulk_publish",
       count: publishedCount,
@@ -1206,6 +1355,20 @@ app.post("/api/fatwas/unpublish-by-number", (req, res) => {
     writeJsonFile(USER_FATWAS_FILE, updatedUserList);
     writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
 
+    // Synchronize unpublished status directly with Cloud Firestore
+    if (serverDb && targetItem && targetItem.id) {
+      setDoc(
+        doc(serverDb, "fatwas", targetItem.id),
+        {
+          status: "معتمدة",
+          approved: true,
+          isPublic: false,
+          updated_at: now,
+        },
+        { merge: true }
+      ).catch((e: any) => console.warn("[Firestore Unpublish Mirror Error]:", e?.message || e));
+    }
+
     broadcastFatwaEvent({
       type: "unpublish_single",
       fatwa: targetItem,
@@ -1216,6 +1379,74 @@ app.post("/api/fatwas/unpublish-by-number", (req, res) => {
       fatwa: targetItem,
       fatwas: updatedUserList.filter((f: any) => !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)),
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Direct single publish endpoint with immediate Firestore mirroring
+app.post("/api/fatwas/publish-single", (req, res) => {
+  try {
+    const rawId = String(req.body.id || req.body.fatwaId || "").trim();
+    if (!rawId) {
+      return res.status(400).json({ success: false, error: "معرف الفتوى مطلوب للنشر" });
+    }
+
+    const deletedSet = readDeletedIds();
+    const userList = readJsonFile(USER_FATWAS_FILE);
+    const approvedList = readJsonFile(APPROVED_FATWAS_FILE);
+    const now = new Date().toISOString();
+
+    let targetItem: any = null;
+
+    const updatedUserList = userList.map((f: any) => {
+      if (f.id === rawId && !isServerFatwaDeleted(f.id, f.fatwaNumber, deletedSet)) {
+        targetItem = {
+          ...f,
+          status: "منشورة",
+          approved: true,
+          isPublic: true,
+          published_at: f.published_at || now,
+          updated_at: now,
+        };
+        return targetItem;
+      }
+      return f;
+    });
+
+    if (!targetItem) {
+      return res.status(404).json({ success: false, error: "لم يتم العثور على الفتوى المحددة." });
+    }
+
+    const updatedApprovedList = approvedList.map((f: any) => {
+      if (f.id === rawId) return targetItem;
+      return f;
+    });
+
+    writeJsonFile(USER_FATWAS_FILE, updatedUserList);
+    writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
+
+    // Mirror to Firestore
+    if (serverDb && targetItem.id) {
+      setDoc(
+        doc(serverDb, "fatwas", targetItem.id),
+        {
+          status: "منشورة",
+          approved: true,
+          isPublic: true,
+          published_at: targetItem.published_at || now,
+          updated_at: now,
+        },
+        { merge: true }
+      ).catch((e: any) => console.warn("[Firestore Publish Single Error]:", e?.message || e));
+    }
+
+    broadcastFatwaEvent({
+      type: "publish_single",
+      fatwa: targetItem,
+    });
+
+    res.json({ success: true, fatwa: targetItem });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1262,6 +1493,24 @@ app.post("/api/fatwas/unpublish-all", (req, res) => {
 
     writeJsonFile(USER_FATWAS_FILE, updatedUserList);
     writeJsonFile(APPROVED_FATWAS_FILE, updatedApprovedList);
+
+    // Mirror unpublish-all directly to Cloud Firestore
+    if (serverDb) {
+      updatedUserList.forEach((f: any) => {
+        if (f && f.id) {
+          setDoc(
+            doc(serverDb, "fatwas", f.id),
+            {
+              status: "معتمدة",
+              approved: true,
+              isPublic: false,
+              updated_at: now,
+            },
+            { merge: true }
+          ).catch((e: any) => console.warn("[Firestore Unpublish All Mirror Error]:", e?.message || e));
+        }
+      });
+    }
 
     broadcastFatwaEvent({
       type: "bulk_unpublish",

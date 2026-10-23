@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   Flame,
   Undo2,
+  KeyRound,
 } from "lucide-react";
 import { Fatwa } from "../types";
 import confetti from "canvas-confetti";
@@ -35,6 +36,8 @@ interface PublishingCenterProps {
   onPublishAllApproved?: () => Promise<void> | void;
   onNavigateToCard?: (fatwa: Fatwa) => void;
   onNavigateToReview?: (fatwa: Fatwa) => void;
+  isSupervisorPublisher?: boolean;
+  onOpenSupervisorUpgradeModal?: () => void;
   showToast?: (msg: string, type?: "success" | "error" | "info") => void;
 }
 
@@ -48,6 +51,8 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   onPublishAllApproved,
   onNavigateToCard,
   onNavigateToReview,
+  isSupervisorPublisher = false,
+  onOpenSupervisorUpgradeModal,
   showToast,
 }) => {
   const [activeSection, setActiveSection] = useState<PublishSection>("pending_publish");
@@ -142,6 +147,11 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
 
   // Publish a single fatwa
   const handlePublishSingle = async (fatwa: Fatwa) => {
+    if (!isSupervisorPublisher) {
+      showToast?.("يرجى إدخال كلمة سر المشرف أولاً لترقية الحساب وتمكين النشر في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setActionLoadingId(fatwa.id);
     try {
       if (onPublishFatwa) {
@@ -169,6 +179,11 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
 
   // Unpublish a single fatwa
   const handleUnpublishSingle = async (fatwa: Fatwa) => {
+    if (!isSupervisorPublisher) {
+      showToast?.("يرجى إدخال كلمة سر المشرف أولاً لترقية الحساب وتمكين إلغاء النشر في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setActionLoadingId(fatwa.id);
     try {
       if (onUnpublishFatwa) {
@@ -217,6 +232,11 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
 
   // Batch publish all approved fatwas
   const handlePublishAllApprovedClick = async () => {
+    if (!isSupervisorPublisher) {
+      showToast?.("يرجى إدخال كلمة سر المشرف أولاً لترقية الحساب وتمكين النشر الجماعي في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     if (pendingPublishFatwas.length === 0) {
       showToast?.("لا توجد فتاوى معتمدة بانتظار النشر حالياً", "info");
       return;
@@ -251,6 +271,11 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   // Save changes from Publisher Edit Modal
   const handleSaveEdit = async (andPublish = false, andApprove = false) => {
     if (!editingFatwa) return;
+    if (andPublish && !isSupervisorPublisher) {
+      showToast?.("يرجى إدخال كلمة سر المشرف أولاً لترقية الحساب وتمكين النشر في فايرستور", "info");
+      onOpenSupervisorUpgradeModal?.();
+      return;
+    }
     setIsSavingEdit(true);
     try {
       const now = new Date().toISOString();
@@ -300,6 +325,42 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
 
   return (
     <div className="space-y-3 max-w-6xl mx-auto pb-16 font-tajawal animate-in fade-in duration-200">
+      {/* شريط حالة ترقية المشرف */}
+      {!isSupervisorPublisher ? (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl text-xs font-tajawal text-amber-950 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-400 text-stone-950 flex items-center justify-center shrink-0 font-bold shadow-xs">
+              <KeyRound className="w-4 h-4" />
+            </div>
+            <div>
+              <strong className="block font-cairo text-xs sm:text-sm text-stone-900">
+                حساب المشرف بانتظار الترقية بكلمة السر لفتح صلاحيات النشر
+              </strong>
+              <span className="text-stone-600 text-[11px]">
+                أدخل كلمة السر الخاصة بالمشرف لتمكين النشر الفوري والسحب المباشر في فايرستور
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSupervisorUpgradeModal}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold font-cairo text-xs shadow-xs transition-all active:scale-95 cursor-pointer shrink-0"
+          >
+            ترقية حساب المشرف الآن 🔑
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between p-2.5 px-3 bg-emerald-50/80 border border-emerald-200/80 rounded-xl text-xs font-cairo text-emerald-950">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-bold">حساب المشرف: ناشر معتمد • متصل مباشرة بفايرستور والبنية التحتية</span>
+          </div>
+          <span className="text-[11px] text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-mono">
+            Firestore Live
+          </span>
+        </div>
+      )}
+
       {/* 3 Simple, Compact Tabs Side-by-Side (مبسط وعملي ومريح للجوال بدون استهلاك للشاشة) */}
       <div className="grid grid-cols-3 gap-1 sm:gap-2 p-1 sm:p-1.5 bg-white rounded-xl sm:rounded-2xl border border-stone-200/90 shadow-xs">
         {/* زر 1: المنشورة */}

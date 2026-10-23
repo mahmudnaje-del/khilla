@@ -44,6 +44,8 @@ import {
   mergeWithServerFatwas,
   getStoredTranscriberInfo,
 } from "./utils/storage";
+import { SupervisorUpgradeModal } from "./components/SupervisorUpgradeModal";
+import { isSupervisorPublisher, getSupervisorSession } from "./utils/supervisorAuth";
 import {
   subscribeToFatwas,
   saveFatwaToFirestore,
@@ -61,6 +63,10 @@ import {
   hasInitialFirestoreSnapshot,
   recordReconciliationTimestamp,
   StaleWriteError,
+  publishSingleFatwaInCloud,
+  unpublishSingleFatwaInCloud,
+  batchPublishFatwasInCloud,
+  batchUnpublishFatwasInCloud,
 } from "./lib/firebase";
 
 export default function App() {
@@ -88,6 +94,12 @@ export default function App() {
   const [strictMode, setStrictMode] = useState<boolean>(true);
   const [isEditorVerified, setIsEditorVerified] = useState<boolean>(() => isEditorAuthorized());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => isEditorAuthorized());
+  // Explicit separation: Regular supervisor has transcribe, edit, and approve.
+  // Publisher supervisor requires explicit secret password promotion.
+  const [isSupervisorPublisherState, setIsSupervisorPublisherState] = useState<boolean>(
+    () => isSupervisorPublisher()
+  );
+  const [isSupervisorUpgradeModalOpen, setIsSupervisorUpgradeModalOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState<boolean>(false);
   const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(true);
@@ -949,9 +961,17 @@ export default function App() {
 
       flushPendingSyncQueue().catch(() => {});
 
+      // Direct Live Cloud Firestore Batch Sync
+      const approvedItems = fatwas.filter((f) => !f.deleted && (f.status === "معتمدة" || f.approved || f.status === "منشورة"));
+      if (approvedItems.length > 0) {
+        batchPublishFatwasInCloud(approvedItems).catch((err) => {
+          console.warn("[Cloud Firestore Batch Publish Error]:", err?.message || err);
+        });
+      }
+
       const totalPublished = (data.success && typeof data.count === "number") ? data.count : localPublishedCount;
       confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
-      showToast(`تم بنجاح نشر جميع الفتاوى المعتمدة (${totalPublished} فتوى) وأصبحت متاحة فوراً في واجهة القراء 🌐`, "success");
+      showToast(`تم بنجاح نشر جميع الفتاوى المعتمدة (${totalPublished} فتوى) في فايرستور وأصبحت متاحة فوراً في واجهة القراء 🌐`, "success");
     } catch (e: any) {
       console.error("Batch publish error:", e);
       const now = new Date().toISOString();
@@ -1021,7 +1041,11 @@ export default function App() {
       });
 
       if (targetItem) {
-        showToast(`تم إلغاء نشر الفتوى رقم #${(targetItem as Fatwa).fatwaNumber || cleanNum} وسحبها من واجهة القراء فوراً 🚫`, "info");
+        // Direct Live Cloud Firestore Unpublish
+        unpublishSingleFatwaInCloud(targetItem).catch((e) => {
+          console.warn("[Cloud Firestore Unpublish Error]:", e?.message || e);
+        });
+        showToast(`تم إلغاء نشر الفتوى رقم #${(targetItem as Fatwa).fatwaNumber || cleanNum} وسحبها من واجهة القراء وفايرستور فوراً 🚫`, "info");
         return true;
       } else if (data.success && data.fatwa) {
         showToast(`تم إلغاء نشر الفتوى رقم #${data.fatwa.fatwaNumber || cleanNum} وسحبها من واجهة القراء 🚫`, "info");
@@ -1067,6 +1091,14 @@ export default function App() {
         saveFatwasToStorage(updated);
         return updated;
       });
+
+      // Direct Live Cloud Firestore Batch Unpublish
+      const publishedItems = fatwas.filter((f) => !f.deleted && (f.status === "منشورة" || (f as any).isPublic === true));
+      if (publishedItems.length > 0) {
+        batchUnpublishFatwasInCloud(publishedItems).catch((err) => {
+          console.warn("[Cloud Firestore Batch Unpublish Error]:", err?.message || err);
+        });
+      }
 
       const totalUnpublished = (data.success && typeof data.count === "number") ? data.count : count;
       showToast(`تم إلغاء نشر جميع الفتاوى (${totalUnpublished} فتوى) وسحبها فوراً من واجهة القراء 🚫`, "info");
@@ -1133,6 +1165,15 @@ export default function App() {
     });
 
     if (publishedItem) {
+      // Direct Live Cloud Firestore Publish
+      publishSingleFatwaInCloud(publishedItem).catch((e) => {
+        console.warn("[Cloud Firestore Single Publish Error]:", e?.message || e);
+      });
+      fetch("/api/fatwas/publish-single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: fatwaId }),
+      }).catch(() => {});
       await handleUpdateFatwa(publishedItem);
     }
   };
@@ -1263,6 +1304,8 @@ export default function App() {
         pendingWritesCount={pendingWritesCount}
         onFetchAllUserFatwas={handleFetchAllUserFatwas}
         isFetchingAllUsersFatwas={isFetchingAllUsersFatwas}
+        isSupervisorPublisher={isSupervisorPublisherState}
+        onOpenSupervisorUpgradeModal={() => setIsSupervisorUpgradeModalOpen(true)}
       />
 
       {/* Main Content Area with desktop right margin for sidebar */}
@@ -1333,6 +1376,8 @@ export default function App() {
                   onFetchAllUserFatwas={handleFetchAllUserFatwas}
                   isFetchingAllUsersFatwas={isFetchingAllUsersFatwas}
                   onOpenArabicDetails={(f) => setDetailsModalFatwa(f)}
+                  isSupervisorPublisher={isSupervisorPublisherState}
+                  onOpenSupervisorUpgradeModal={() => setIsSupervisorUpgradeModalOpen(true)}
                 />
               </motion.div>
             )}
@@ -1403,11 +1448,20 @@ export default function App() {
                     setActiveTab("review");
                   }}
                   onOpenArchive={() => setActiveTab("archive")}
-                  onOpenPublishingCenter={() => setActiveTab("publish")}
+                  onOpenPublishingCenter={() => {
+                    if (!isSupervisorPublisherState) {
+                      showToast("يلزم ترقية حساب المشرف أولاً وإدخال كلمة السر لفتح مركز النشر", "info");
+                      setIsSupervisorUpgradeModalOpen(true);
+                      return;
+                    }
+                    setActiveTab("publish");
+                  }}
                   onPublishAllApproved={handleBatchPublishApproved}
                   onUnpublishFatwaByNumber={handleUnpublishFatwaByNumber}
                   onUnpublishAllFatwas={handleUnpublishAllFatwas}
                   isPublishSyncing={isPublishSyncing}
+                  isSupervisorPublisher={isSupervisorPublisherState}
+                  onOpenSupervisorUpgradeModal={() => setIsSupervisorUpgradeModalOpen(true)}
                   showToast={showToast}
                 />
               </motion.div>
@@ -1435,6 +1489,8 @@ export default function App() {
                     setCurrentFatwa(f);
                     setActiveTab("review");
                   }}
+                  isSupervisorPublisher={isSupervisorPublisherState}
+                  onOpenSupervisorUpgradeModal={() => setIsSupervisorUpgradeModalOpen(true)}
                   showToast={showToast}
                 />
               </motion.div>
@@ -1520,6 +1576,16 @@ export default function App() {
           setHref("/");
           showToast("تم تسجيل الخروج وقفل لوحة المحررين", "info");
         }}
+      />
+
+      {/* Supervisor Upgrade Modal with Secret Password Prompt */}
+      <SupervisorUpgradeModal
+        isOpen={isSupervisorUpgradeModalOpen}
+        onClose={() => setIsSupervisorUpgradeModalOpen(false)}
+        onSuccess={() => {
+          setIsSupervisorPublisherState(true);
+        }}
+        showToast={showToast}
       />
 
       {/* Install Prompt Modal */}
